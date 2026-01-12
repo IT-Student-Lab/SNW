@@ -1,0 +1,5 @@
+*.venv
+*.png
+*.ipynb_checkpoints
+*.dxf
+*.env
