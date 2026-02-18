@@ -14,12 +14,14 @@ from shapely.geometry import shape
 from dotenv import load_dotenv
 from openai import OpenAI
 import base64
+from collections import Counter
+import math
 
 # %%
-
+"""
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+"""
 
 # %%
 adres = "Rust en Vreugdlaan 2, 2243 AS Wassenaar"
@@ -31,8 +33,6 @@ SUGGEST = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/suggest"
 LOOKUP  = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/lookup"
 KADAS = "https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1"
 BGT_BASE = "https://api.pdok.nl/lv/bgt/ogc/v1"
-TOPO = "https://service.pdok.nl/brt/achtergrondkaart/wms/v2_0"
-
 RD_CRS = "http://www.opengis.net/def/crs/EPSG/0/28992"
 
 # %% [markdown]
@@ -121,15 +121,23 @@ PLU_WMS = "https://service.pdok.nl/kadaster/plu/wms/v1_0"
 KAD_WMS = "https://service.pdok.nl/kadaster/kadastralekaart/wms/v5_0?"
 GMK_WMS= "https://service.pdok.nl/bzk/bro-geomorfologischekaart/wms/v2_0?"
 BODEM_WMS = "https://service.pdok.nl/bzk/bro-bodemkaart/wms/v1_0"
-
+TOPO_WMS = "https://service.pdok.nl/brt/topraster/wms/v1_0"
 
 # %%
 def wms_to_image(wms_url, params):
     r = requests.get(wms_url, params=params, timeout=60)
     r.raise_for_status()
+
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    if "image" not in ctype:
+        # dit is bijna altijd een ServiceException XML/HTML
+        print("---- WMS returned non-image ----")
+        print("URL:", r.url)
+        print("Content-Type:", ctype)
+        print("First 600 chars:\n", r.text[:600])
+        raise ValueError("WMS response is not an image (see debug output above).")
+
     return Image.open(BytesIO(r.content)).convert("RGBA")
-
-
 
 # %%
 def wms_parameters(bbox, width=2000, height=2000):
@@ -144,6 +152,166 @@ def wms_parameters(bbox, width=2000, height=2000):
         "format": "image/png",
         "transparent": "true",
     }
+
+# %%
+def gmk_getfeatureinfo(GMK_WMS, bbox, width, height, i, j, layer="geomorphological_area"):
+    params = {
+        "SERVICE": "WMS",
+        "VERSION": "1.3.0",
+        "REQUEST": "GetFeatureInfo",
+        "CRS": "EPSG:28992",
+        "BBOX": ",".join(map(str, bbox)),
+        "WIDTH": str(width),
+        "HEIGHT": str(height),
+        "LAYERS": layer,
+        "QUERY_LAYERS": layer,
+        "STYLES": "",
+        "FORMAT": "image/png",
+        "INFO_FORMAT": "application/json",
+        "I": str(int(i)),
+        "J": str(int(j)),
+        "FEATURE_COUNT": "1",
+    }
+    r = requests.get(GMK_WMS, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def _pick_gmk_code_and_label(props: dict) -> tuple[str | None, str | None]:
+    code = props.get("landform_subgroup_code")
+    label = props.get("landform_subgroup_description")
+    if code and label:
+        return str(code), str(label)
+    if code:
+        return str(code), str(code)
+    return None, None
+
+def collect_gmk_items_in_bbox(
+    GMK_WMS,
+    bbox,
+    grid=15,
+    probe_size=800,
+    layer="geomorphological_area",
+):
+    width = height = probe_size
+    xs = [int((k + 0.5) * width / grid) for k in range(grid)]
+    ys = [int((k + 0.5) * height / grid) for k in range(grid)]
+
+    counts = Counter()          # code -> hits
+    labels = {}                 # code -> description
+
+    for i in xs:
+        for j in ys:
+            data = gmk_getfeatureinfo(GMK_WMS, bbox, width, height, i, j, layer=layer)
+            feats = data.get("features", []) or []
+            if not feats:
+                continue
+            props = feats[0].get("properties") or {}
+
+            code, label = _pick_gmk_code_and_label(props)
+            if not code:
+                continue
+
+            counts[code] += 1
+            # eerste label bewaren
+            labels.setdefault(code, label or code)
+
+    return counts, labels
+
+def build_compact_gmk_legend(
+    items: list[tuple[str, str, int]],   # (code, label, hits)
+    title="Geomorfologie (aanwezig in bbox)",
+    max_items=12
+) -> Image.Image:
+    try:
+        font = ImageFont.truetype("arial.ttf", 22)
+        font_b = ImageFont.truetype("arial.ttf", 28)
+    except Exception:
+        font = ImageFont.load_default()
+        font_b = ImageFont.load_default()
+
+    items = items[:max_items]
+
+    pad = 18
+    W = 950
+    line_h = 30
+
+    # simpele hoogteberekening
+    H = pad*2 + 55 + len(items)*line_h + 30
+    img = Image.new("RGBA", (W, H), (255, 255, 255, 235))
+    d = ImageDraw.Draw(img)
+
+    d.text((pad, pad), title, font=font_b, fill=(0, 0, 0, 255))
+
+    y = pad + 45
+    for code, label, n in items:
+        # afkappen zodat het niet uit beeld loopt
+        text = f"{code} — {label}"
+        if len(text) > 80:
+            text = text[:77] + "…"
+        d.text((pad, y), text, font=font, fill=(0, 0, 0, 255))
+        d.text((W - pad - 120, y), f"~{n}", font=font, fill=(80, 80, 80, 255))
+        y += line_h
+
+    d.text((pad, H - pad - 20), "Alleen aanwezige eenheden getoond (sampling).", font=font, fill=(60, 60, 60, 255))
+    return img
+
+
+# %%
+def get_topo_layer_and_bbox(
+    bbox,
+    target_px=2000,
+    pixel_size_m=0.00028,  # OGC default pixel size
+):
+    """
+    Kiest TOPraster layer en dwingt bbox af zodat scale binnen de layer-range valt.
+    - Als je te ver ingezoomd bent: bbox wordt vergroot.
+    - Als je te ver uitgezoomd bent: bbox wordt verkleind.
+    Retourneert: (layer_name, bbox_rd)
+    """
+
+    # Min/Max scale denominators uit GetCapabilities (zoals jij ze zag)
+    # top25:  4000 ..  50000
+    # top50: 12000 .. 100000
+    # top100:24000 .. 200000
+    # top250:60000 .. 500000
+    LAYERS = [
+        ("top25raster",  4000,   50000),
+        ("top50raster",  12000, 100000),
+        ("top100raster", 24000, 200000),
+        ("top250raster", 60000, 500000),
+    ]
+
+    minx, miny, maxx, maxy = bbox
+    cx = (minx + maxx) / 2
+    cy = (miny + maxy) / 2
+
+    span = max(maxx - minx, maxy - miny)  # meters
+    m_per_px = span / float(target_px)
+    scale = m_per_px / float(pixel_size_m)
+
+    # 1) Kies eerst een layer puur op basis van je huidige schaal
+    #    (als je ver ingezoomd bent, is top25 nog steeds "de juiste", maar bbox moet omhoog)
+    if scale <= 50000:
+        layer, smin, smax = LAYERS[0]
+    elif scale <= 100000:
+        layer, smin, smax = LAYERS[1]
+    elif scale <= 200000:
+        layer, smin, smax = LAYERS[2]
+    else:
+        layer, smin, smax = LAYERS[3]
+
+    # 2) Dwing schaal binnen [smin, smax] door span aan te passen
+    #    scale = (span/target_px) / pixel_size_m  => span = scale * pixel_size_m * target_px
+    min_span = smin * pixel_size_m * target_px
+    max_span = smax * pixel_size_m * target_px
+
+    # afdwingen: clamp span naar [min_span, max_span]
+    forced_span = max(min_span, min(max_span, span))
+    half = forced_span / 2
+
+    bbox_forced = (cx - half, cy - half, cx + half, cy + half)
+    return layer, bbox_forced
+
 
 # %%
 params = wms_parameters(bbox)
@@ -188,10 +356,11 @@ luchtfoto_groot = wms_to_image(WMS_URL, {
     "styles": "",
 })
 
-topo_kaart = wms_to_image(TOPO, {
+topo_kaart = wms_to_image(TOPO_WMS, {
     **params,
-    "layers": "standaard",
+    "layers": "top25raster",
     "styles": "",
+    "transparent": "false"
 })
 
 
@@ -312,8 +481,7 @@ legend_img = Image.open(BytesIO(requests.get(legend_url, timeout=30).content)).c
 
 # %%
 plu_plus_percelen = Image.alpha_composite(bestemming, percelen)
-#features = fetch_top10nl_plaats_punt(bbox_groot)
-# legenda erop
+
 bestemming_kadaster = place_legend_on_image(
     base=plu_plus_percelen,
     legend=legend_img,
@@ -328,6 +496,15 @@ bestemmingdubbel = place_legend_on_image(
     legend_scale=2.0,           
     legend_max_width_ratio=0.2
 )
+layer, bbox_topo = get_topo_layer_and_bbox(bbox)
+
+
+topo_kaart = wms_to_image(TOPO_WMS, {
+    **wms_parameters(bbox_topo, width=2000, height=2000),
+    "layers": layer,
+    "styles": "",
+    "transparent": "false"
+})
 topo_kaart.save("topo_kaart.png")
 bestemmingdubbel.save("Bestemming_dubbel.png")
 luchtfoto.save("Luchtfoto.png")
@@ -335,17 +512,32 @@ bestemming_kadaster.save("Bestemming_percelen.png")
 
 luchtfoto_plus_percelen = Image.alpha_composite(luchtfoto, percelen)
 luchtfoto_plus_percelen.save("luchtfoto_kadaster.png")
+# GMK kaart ophalen
 geo = wms_to_image(GMK_WMS, {
     **wms_parameters(bbox, width=2000, height=2000),
     "layers": "geomorphological_area",
     "styles": "",
 })
 
-try:
-    legend = wms_legend_from_capabilities(GMK_WMS, "geomorphological_area")
-    geo = place_legend_on_image(geo, legend, position="bottom-right")
-except Exception as e:
-    print(f"[WARN] Geomorfologische legenda ophalen mislukt: {e}")
+
+counts, labels = collect_gmk_items_in_bbox(
+    GMK_WMS,
+    bbox=bbox,
+    grid=15,        # 15 = snel; 25 = netter
+    probe_size=800,
+    layer="geomorphological_area",
+)
+
+
+geo = place_legend_on_image(
+    base=geo,
+    legend=compact_legend,
+    position="bottom-right",
+    legend_scale=1.0,
+    legend_max_width_ratio=0.45,
+    add_white_box=False,  # we hebben al wit vlak
+)
+
 
 geo.save("Geomorfologische_kaart.png")
 
@@ -881,6 +1073,7 @@ def write_bgt_toggle_scripts(doc, dxf_out_path: str, prefix: str = "BGT-") -> tu
 def export_cad_onderlegger_dxf(
     out_path: str,
     bbox_rd: Tuple[float, float, float, float],
+    bbox_topo_rd: Tuple[float, float, float, float] | None = None,
     kadas_base_url: str = "https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1",
     include_percelen: bool = True,
     include_bebouwing: bool = True,
@@ -916,13 +1109,14 @@ def export_cad_onderlegger_dxf(
     # ===============================
     # RASTERS (onderaan)
     # ===============================
+    bbox_for_topo = bbox_topo_rd or bbox_rd
 
     L_TOPO = "$$_00-00-00_onderlegger_Topokaart"
     _ensure_raster_layer(L_TOPO, default_on=False)
     add_georef_image_to_doc(
         doc=doc,
         image_path="topo_kaart.png",
-        bbox_rd=bbox_rd,
+        bbox_rd=bbox_for_topo,
         layer=L_TOPO,
     )
 
@@ -1112,7 +1306,7 @@ def export_cad_onderlegger_dxf(
     return out_path
 
 # %%
-# 1) AHN PNG opslaan (zorg dat hij naast de DXF komt te staan)
+
 ahn_png_dsm = download_ahn_png(bbox, out_path="ahn_dsm.png", product="dsm")
 ahn_png_dtm = download_ahn_png(bbox, out_path="ahn_dtm.png", product="dtm")
 wdm_png_GHG = download_wdm_png(
@@ -1153,6 +1347,7 @@ bodemkundig_png = download_bodemkundig_belang_png(
 dxf_path = export_cad_onderlegger_dxf(
     out_path="onderlegger_snw_met_rasters.dxf",
     bbox_rd=bbox,
+    bbox_topo_rd=bbox_topo,
     include_percelen=True,
     include_bebouwing=True
 )
