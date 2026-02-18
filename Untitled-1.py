@@ -154,109 +154,6 @@ def wms_parameters(bbox, width=2000, height=2000):
     }
 
 # %%
-def gmk_getfeatureinfo(GMK_WMS, bbox, width, height, i, j, layer="geomorphological_area"):
-    params = {
-        "SERVICE": "WMS",
-        "VERSION": "1.3.0",
-        "REQUEST": "GetFeatureInfo",
-        "CRS": "EPSG:28992",
-        "BBOX": ",".join(map(str, bbox)),
-        "WIDTH": str(width),
-        "HEIGHT": str(height),
-        "LAYERS": layer,
-        "QUERY_LAYERS": layer,
-        "STYLES": "",
-        "FORMAT": "image/png",
-        "INFO_FORMAT": "application/json",
-        "I": str(int(i)),
-        "J": str(int(j)),
-        "FEATURE_COUNT": "1",
-    }
-    r = requests.get(GMK_WMS, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-def _pick_gmk_code_and_label(props: dict) -> tuple[str | None, str | None]:
-    code = props.get("landform_subgroup_code")
-    label = props.get("landform_subgroup_description")
-    if code and label:
-        return str(code), str(label)
-    if code:
-        return str(code), str(code)
-    return None, None
-
-def collect_gmk_items_in_bbox(
-    GMK_WMS,
-    bbox,
-    grid=15,
-    probe_size=800,
-    layer="geomorphological_area",
-):
-    width = height = probe_size
-    xs = [int((k + 0.5) * width / grid) for k in range(grid)]
-    ys = [int((k + 0.5) * height / grid) for k in range(grid)]
-
-    counts = Counter()          # code -> hits
-    labels = {}                 # code -> description
-
-    for i in xs:
-        for j in ys:
-            data = gmk_getfeatureinfo(GMK_WMS, bbox, width, height, i, j, layer=layer)
-            feats = data.get("features", []) or []
-            if not feats:
-                continue
-            props = feats[0].get("properties") or {}
-
-            code, label = _pick_gmk_code_and_label(props)
-            if not code:
-                continue
-
-            counts[code] += 1
-            # eerste label bewaren
-            labels.setdefault(code, label or code)
-
-    return counts, labels
-
-def build_compact_gmk_legend(
-    items: list[tuple[str, str, int]],   # (code, label, hits)
-    title="Geomorfologie (aanwezig in bbox)",
-    max_items=12
-) -> Image.Image:
-    try:
-        font = ImageFont.truetype("arial.ttf", 22)
-        font_b = ImageFont.truetype("arial.ttf", 28)
-    except Exception:
-        font = ImageFont.load_default()
-        font_b = ImageFont.load_default()
-
-    items = items[:max_items]
-
-    pad = 18
-    W = 950
-    line_h = 30
-
-    # simpele hoogteberekening
-    H = pad*2 + 55 + len(items)*line_h + 30
-    img = Image.new("RGBA", (W, H), (255, 255, 255, 235))
-    d = ImageDraw.Draw(img)
-
-    d.text((pad, pad), title, font=font_b, fill=(0, 0, 0, 255))
-
-    y = pad + 45
-    for code, label, n in items:
-        # afkappen zodat het niet uit beeld loopt
-        text = f"{code} — {label}"
-        if len(text) > 80:
-            text = text[:77] + "…"
-        d.text((pad, y), text, font=font, fill=(0, 0, 0, 255))
-        d.text((W - pad - 120, y), f"~{n}", font=font, fill=(80, 80, 80, 255))
-        y += line_h
-
-    d.text((pad, H - pad - 20), "Alleen aanwezige eenheden getoond (sampling).", font=font, fill=(60, 60, 60, 255))
-    return img
-
-
-# %%
 def get_topo_layer_and_bbox(
     bbox,
     target_px=2000,
@@ -460,6 +357,128 @@ def place_legend_on_image(
 
 
 # %%
+def extract_dominant_colors(img: Image.Image, n=12, sample=6):
+    im = img.convert("RGBA")
+
+    # downsample voor snelheid
+    if sample > 1:
+        im = im.resize(
+            (max(1, im.size[0] // sample), max(1, im.size[1] // sample)),
+            Image.Resampling.NEAREST
+        )
+
+    px = list(im.getdata())
+
+    # filter: transparant en bijna wit eruit
+    filtered = []
+    for r, g, b, a in px:
+        if a < 10:
+            continue
+        if r > 245 and g > 245 and b > 245:
+            continue
+        filtered.append((r, g, b))
+
+    if not filtered:
+        return []
+
+    tmp = Image.new("RGB", im.size)
+    # vul rest met wit zodat putdata lengte klopt
+    total_px = im.size[0] * im.size[1]
+    tmp.putdata(filtered + [(255, 255, 255)] * (total_px - len(filtered)))
+
+    q = tmp.quantize(colors=n, method=Image.Quantize.MEDIANCUT)
+    counts = q.getcolors()  # (count, palette_index)
+    palette = q.getpalette()
+
+    total = sum(c for c, _ in counts)
+    counts.sort(reverse=True, key=lambda x: x[0])
+
+    out = []
+    for c, idx in counts[:n]:
+        r = palette[idx*3 + 0]
+        g = palette[idx*3 + 1]
+        b = palette[idx*3 + 2]
+        out.append(((r, g, b), c / total))
+    return out
+
+
+def build_color_meaning_legend(rows, title="Geomorfologie (aanwezig)"):
+    """
+    rows: list of dicts: {"rgb":(r,g,b), "pct":float, "label":str}
+    """
+    try:
+        font = ImageFont.truetype("arial.ttf", 22)
+        font_b = ImageFont.truetype("arial.ttf", 28)
+    except Exception:
+        font = ImageFont.load_default()
+        font_b = ImageFont.load_default()
+
+    pad = 16
+    sw = 28
+    line_h = 34
+    W = 980
+    H = pad*2 + 50 + len(rows)*line_h + 10
+
+    img = Image.new("RGBA", (W, H), (255, 255, 255, 235))
+    d = ImageDraw.Draw(img)
+
+    d.text((pad, pad), title, font=font_b, fill=(0, 0, 0, 255))
+
+    y = pad + 45
+    for r in rows:
+        rr, gg, bb = r["rgb"]
+        d.rectangle([pad, y+3, pad+sw, y+3+sw], fill=(rr, gg, bb, 255), outline=(0, 0, 0, 90))
+        d.text((pad + sw + 12, y+6), f'{r["pct"]:.1f}%', font=font, fill=(0, 0, 0, 255))
+
+        label = r.get("label") or "(onbekend)"
+        if len(label) > 80:
+            label = label[:77] + "…"
+        d.text((pad + sw + 110, y+6), label, font=font, fill=(0, 0, 0, 255))
+        y += line_h
+
+    return img
+
+
+# %%
+def gmk_label_at_pixel(GMK_WMS, bbox, width, height, x, y, layer="geomorphological_area"):
+    data = gmk_getfeatureinfo(GMK_WMS, bbox, width, height, x, y, layer=layer)
+    feats = data.get("features", []) or []
+    if not feats:
+        return None
+    props = feats[0].get("properties") or {}
+    code = props.get("landform_subgroup_code")
+    desc = props.get("landform_subgroup_description")
+    if code and desc:
+        return f"{code} — {desc}"
+    if code:
+        return str(code)
+    return None
+
+# %%
+def find_representative_pixel(img: Image.Image, rgb, max_samples=200000, tol=10):
+    """
+    Zoek een pixel in img die (ongeveer) deze rgb heeft.
+    tol = kleurafwijking per kanaal.
+    Return: (x, y) of None
+    """
+    im = img.convert("RGBA")
+    w, h = im.size
+    px = im.load()
+
+    # scan met stride zodat het snel is
+    stride = max(1, int((w * h / max_samples) ** 0.5))
+    r0, g0, b0 = rgb
+
+    for y in range(0, h, stride):
+        for x in range(0, w, stride):
+            r, g, b, a = px[x, y]
+            if a < 10:
+                continue
+            if abs(r - r0) <= tol and abs(g - g0) <= tol and abs(b - b0) <= tol:
+                return x, y
+    return None
+
+# %%
 def wms_legend_to_image(wms_url: str, layer: str, style: str = "", version: str = "1.3.0") -> Image.Image:
     params = {
         "service": "WMS",
@@ -512,32 +531,41 @@ bestemming_kadaster.save("Bestemming_percelen.png")
 
 luchtfoto_plus_percelen = Image.alpha_composite(luchtfoto, percelen)
 luchtfoto_plus_percelen.save("luchtfoto_kadaster.png")
-# GMK kaart ophalen
+# 1) GMK kaart (GetMap)
+W = H = 2000
 geo = wms_to_image(GMK_WMS, {
-    **wms_parameters(bbox, width=2000, height=2000),
+    **wms_parameters(bbox, width=W, height=H),
     "layers": "geomorphological_area",
     "styles": "",
+    "transparent": "false",
 })
 
+# 2) dominante kleuren
+dominant = extract_dominant_colors(geo, n=10, sample=6)  # [(rgb, frac), ...]
 
-counts, labels = collect_gmk_items_in_bbox(
-    GMK_WMS,
-    bbox=bbox,
-    grid=15,        # 15 = snel; 25 = netter
-    probe_size=800,
-    layer="geomorphological_area",
-)
+# 3) per top-kleur: 1× GetFeatureInfo voor betekenis
+rows = []
+TOP_K = 6
+for (rgb, frac) in dominant[:TOP_K]:
+    pt = find_representative_pixel(geo, rgb, tol=12)
+    label = None
+    if pt is not None:
+        x, y = pt
+        label = gmk_label_at_pixel(GMK_WMS, bbox, W, H, x, y)
+    if label and "—" in label:
+        label = label.split("—", 1)[1].strip()
+    rows.append({"rgb": rgb, "pct": frac * 100, "label": label})
 
+legend = build_color_meaning_legend(rows, title="Geomorfologie (dominante klassen)")
 
 geo = place_legend_on_image(
     base=geo,
-    legend=compact_legend,
+    legend=legend,
     position="bottom-right",
     legend_scale=1.0,
-    legend_max_width_ratio=0.45,
-    add_white_box=False,  # we hebben al wit vlak
+    legend_max_width_ratio=0.55,
+    add_white_box=False,
 )
-
 
 geo.save("Geomorfologische_kaart.png")
 
