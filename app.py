@@ -35,7 +35,7 @@ with st.sidebar:
     x = y = None
 
     if mode == "Adres":
-        adres = st.text_input("Adres", value="Haapsstraat 40, Nijmegen")
+        adres = st.text_input("Adres", value="")
     else:
         x = st.number_input("RD X (EPSG:28992)", value=188584.761, format="%.3f")
         y = st.number_input("RD Y (EPSG:28992)", value=426360.756, format="%.3f")
