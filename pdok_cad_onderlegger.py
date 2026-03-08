@@ -786,6 +786,8 @@ def add_georef_image_to_doc(
         dxfattribs={"layer": layer},
     )
 
+    image_entity.transparency = 0.0
+
     try:
         image_entity.dxf.fade = int(fade)
         image_entity.dxf.contrast = int(contrast)
@@ -1072,14 +1074,18 @@ def build_plu_outputs(
     )
     bestemming_kadaster.save(out_bestemming_percelen)
 
+    # dubbelbestemming laag op enkelbestemming zetten
+    enkel_plus_dubbel = Image.alpha_composite(enkel, dubbel)
+
     bestemmingdubbel = place_legend_on_image(
-        base=dubbel,
+        base=enkel_plus_dubbel,
         legend=legend_img,
         position="bottom-right",
         legend_scale=2.0,
         legend_max_width_ratio=0.2,
     )
-    save_png_palette_transparency(bestemmingdubbel, out_bestemming_dubbel)
+
+    bestemmingdubbel.save(out_bestemming_dubbel)    
 
 
 # =========================
