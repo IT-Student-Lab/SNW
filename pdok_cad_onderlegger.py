@@ -6,8 +6,10 @@ PDOK CAD Onderlegger (DXF) generator
 from __future__ import annotations
 
 import argparse
+import html as ihtml
 import math
 import re
+import sqlite3
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from io import BytesIO
@@ -39,6 +41,8 @@ WMS_BODEM = "https://service.pdok.nl/bzk/bro-bodemkaart/wms/v1_0"
 WMS_TOPO = "https://service.pdok.nl/brt/topraster/wms/v1_0"
 WMS_AHN = "https://service.pdok.nl/rws/ahn/wms/v1_0"
 WMS_WDM = "https://service.pdok.nl/bzk/bro-grondwaterspiegeldiepte/wms/v2_0"
+
+BODEM_GPKG_PATH = Path("BRO-SGM-DownloadBodemkaart-V2024-01_1.gpkg")
 
 
 # =========================
@@ -472,39 +476,65 @@ def build_pretty_legend(
     return img
 
 
-def extract_rows_from_vertical_legend(legend_img: Image.Image, *, title: str) -> Image.Image:
+def extract_rows_from_vertical_legend(
+    legend_img: Image.Image,
+    *,
+    title: str,
+    max_width: int = 420,
+    max_height: int = 520,
+    scale: float = 1.15,
+) -> Image.Image:
+    """
+    Zet een standaard verticale legenda in een nette compacte kaart.
+    Vooral bedoeld voor hele lange WMS-legenda's zoals bodemvlakken.
+    """
     legend = legend_img.convert("RGBA")
 
-    scale = 1.4
+    # eerst iets vergroten voor leesbaarheid
     legend = legend.resize(
-        (int(legend.size[0] * scale), int(legend.size[1] * scale)),
+        (max(1, int(legend.size[0] * scale)), max(1, int(legend.size[1] * scale))),
         Image.Resampling.LANCZOS,
     )
 
-    pad = 20
-    header_h = 56
-    width = min(max(legend.size[0] + 2 * pad, 420), 900)
+    # hard cap op breedte/hoogte
+    ratio = min(max_width / legend.size[0], max_height / legend.size[1], 1.0)
+    if ratio < 1.0:
+        legend = legend.resize(
+            (max(1, int(legend.size[0] * ratio)), max(1, int(legend.size[1] * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+
+    pad = 18
+    header_h = 52
+    width = legend.size[0] + 2 * pad
     height = legend.size[1] + 2 * pad + header_h
 
     card = Image.new("RGBA", (width, height), (255, 255, 255, 0))
     d = ImageDraw.Draw(card)
 
     try:
-        font_title = ImageFont.truetype("arial.ttf", 28)
+        font_title = ImageFont.truetype("arial.ttf", 24)
     except Exception:
         font_title = ImageFont.load_default()
 
-    d.rounded_rectangle([6, 6, width - 1, height - 1], radius=18, fill=(0, 0, 0, 40))
+    # schaduw
     d.rounded_rectangle(
-        [0, 0, width - 8, height - 8],
-        radius=18,
+        [5, 5, width - 1, height - 1],
+        radius=16,
+        fill=(0, 0, 0, 35),
+    )
+
+    # witte kaart
+    d.rounded_rectangle(
+        [0, 0, width - 6, height - 6],
+        radius=16,
         fill=(255, 255, 255, 238),
-        outline=(180, 180, 180, 180),
+        outline=(185, 185, 185, 180),
         width=1,
     )
 
-    d.text((pad, 16), title, font=font_title, fill=(20, 20, 20, 255))
-    d.line((pad, header_h, width - pad - 8, header_h), fill=(210, 210, 210, 255), width=1)
+    d.text((pad, 14), title, font=font_title, fill=(20, 20, 20, 255))
+    d.line((pad, header_h, width - pad - 6, header_h), fill=(210, 210, 210, 255), width=1)
 
     x = (width - legend.size[0]) // 2
     y = header_h + pad
@@ -940,13 +970,19 @@ def download_ahn(
             except Exception:
                 raw_legend = wms_legend_from_capabilities(WMS_AHN, layer, session=session)
 
-            legend = extract_rows_from_vertical_legend(raw_legend, title=f"AHN {product.upper()}")
+            legend = extract_rows_from_vertical_legend(
+                raw_legend,
+                title=f"AHN {product.upper()}",
+                max_width=1100,
+                max_height=900,
+                scale=1.65,
+            )
             img = place_legend_on_image(
                 img,
                 legend,
                 position="bottom-right",
                 legend_scale=1.0,
-                legend_max_width_ratio=0.32,
+                legend_max_width_ratio=0.58,
                 add_white_box=False,
             )
         except Exception as e:
@@ -955,49 +991,291 @@ def download_ahn(
     img.save(out_path)
 
 
-def download_bodem_layer(
+def bodem_getfeatureinfo(
+    bbox: BBox,
+    width: int,
+    height: int,
+    i: int,
+    j: int,
+    layer: str = "soilarea",
+    session: Optional[requests.Session] = None,
+) -> Dict[str, Any]:
+    s = session or requests.Session()
+    params = {
+        "SERVICE": "WMS",
+        "VERSION": "1.3.0",
+        "REQUEST": "GetFeatureInfo",
+        "CRS": "EPSG:28992",
+        "BBOX": _bbox_str(bbox),
+        "WIDTH": str(width),
+        "HEIGHT": str(height),
+        "LAYERS": layer,
+        "QUERY_LAYERS": layer,
+        "STYLES": "",
+        "FORMAT": "image/png",
+        "INFO_FORMAT": "application/json",
+        "I": str(int(i)),
+        "J": str(int(j)),
+        "FEATURE_COUNT": "1",
+    }
+    r = s.get(WMS_BODEM, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+
+def normalize_bodem_code(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.replace("\u00a0", " ").strip()
+    m = re.search(r"\b([A-Za-z]{1,4}[A-Za-z]?[0-9]{0,4}[A-Za-z0-9-]*)\b", s)
+    if not m:
+        return None
+    return m.group(1).upper()
+
+
+def _find_candidate_tables(con: sqlite3.Connection) -> List[str]:
+    q = (
+        "SELECT name FROM sqlite_master "
+        "WHERE type IN ('table', 'view') "
+        "AND name NOT LIKE 'gpkg_%' "
+        "AND name NOT LIKE 'rtree_%' "
+        "AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    return [r[0] for r in con.execute(q).fetchall()]
+
+
+def _table_columns(con: sqlite3.Connection, table_name: str) -> List[str]:
+    q = f"PRAGMA table_info('{table_name}')"
+    return [r[1] for r in con.execute(q).fetchall()]
+
+
+def load_all_bodem_code_map(gpkg_path: Path) -> Dict[str, str]:
+    if not gpkg_path.exists():
+        _log(f"[WARN] Bodem GPKG niet gevonden: {gpkg_path}")
+        return {}
+
+    con = sqlite3.connect(str(gpkg_path))
+    con.row_factory = sqlite3.Row
+    mapping: Dict[str, str] = {}
+
+    try:
+        tables = _find_candidate_tables(con)
+        interesting_tables: List[str] = []
+
+        for t in tables:
+            cols = [c.lower() for c in _table_columns(con, t)]
+            joined = " ".join(cols)
+            if (
+                "soilunit" in joined
+                or "soilcode" in joined
+                or "legend" in joined
+                or ("code" in joined and "description" in joined)
+            ):
+                interesting_tables.append(t)
+
+        for table in interesting_tables:
+            cols = _table_columns(con, table)
+            cols_l = {c.lower(): c for c in cols}
+
+            code_candidates = [
+                "soilunit_code",
+                "soilcode",
+                "code",
+                "first_soilcode",
+                "maplegend_code",
+                "legend_code",
+            ]
+            desc_candidates = [
+                "soilunit_code_description",
+                "soilunit_description",
+                "soilunitname",
+                "description",
+                "naam",
+                "legend_text",
+                "maplegend_text",
+            ]
+
+            code_col = next((cols_l[c] for c in code_candidates if c in cols_l), None)
+            desc_col = next((cols_l[c] for c in desc_candidates if c in cols_l), None)
+
+            if not code_col or not desc_col:
+                continue
+
+            q = (
+                f'SELECT DISTINCT "{code_col}" AS code, "{desc_col}" AS descr '
+                f'FROM "{table}" '
+                f'WHERE "{code_col}" IS NOT NULL AND "{desc_col}" IS NOT NULL'
+            )
+
+            for row in con.execute(q):
+                code = normalize_bodem_code(row["code"])
+                descr = str(row["descr"]).strip() if row["descr"] is not None else ""
+                if code and descr and len(descr) > 3:
+                    mapping[code] = descr
+
+        _log(f"[BODEM] {len(mapping)} codes geladen uit {gpkg_path.name}")
+        return dict(sorted(mapping.items()))
+    finally:
+        con.close()
+
+
+BODEM_CODE_MAP: Dict[str, str] = load_all_bodem_code_map(BODEM_GPKG_PATH)
+
+
+def bodem_code_to_label(value: Any) -> Optional[str]:
+    code = normalize_bodem_code(value)
+    if not code:
+        return None
+    return BODEM_CODE_MAP.get(code)
+
+
+def looks_like_only_bodem_code(value: Any) -> bool:
+    code = normalize_bodem_code(value)
+    if not code:
+        return False
+    return str(value).strip().upper() == code
+
+
+def bodem_label_from_properties(
+    props: Dict[str, Any],
+    *,
+    session: Optional[requests.Session] = None,
+) -> Optional[str]:
+    descriptive_keys = [
+        "soilunit_code_description",
+        "soilunit_description",
+        "soilunitname",
+        "soil_name",
+        "bodemeenheid",
+        "naam",
+        "description",
+        "legend_text",
+        "maplegend",
+        "maplegend_text",
+    ]
+
+    for k in descriptive_keys:
+        v = props.get(k)
+        if not v:
+            continue
+        v_str = str(v).strip()
+        if not v_str:
+            continue
+
+        mapped = bodem_code_to_label(v_str)
+        if mapped:
+            return mapped
+
+        if len(v_str) > 8 and not looks_like_only_bodem_code(v_str):
+            return v_str
+
+    code_keys = [
+        "soilunit_code",
+        "code",
+        "legend_code",
+        "maplegend_code",
+    ]
+    for k in code_keys:
+        v = props.get(k)
+        mapped = bodem_code_to_label(v)
+        if mapped:
+            return mapped
+
+    for _, v in props.items():
+        mapped = bodem_code_to_label(v)
+        if mapped:
+            return mapped
+
+    for _, v in props.items():
+        if isinstance(v, str):
+            s = v.strip()
+            if s and len(s) > 8 and not looks_like_only_bodem_code(s):
+                return s
+
+    for k in code_keys:
+        v = props.get(k)
+        if v:
+            return str(v).strip()
+
+    return "Onbekende bodemklasse"
+
+def bodem_label_at_pixel(
+    bbox: BBox,
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    layer: str = "soilarea",
+    session: Optional[requests.Session] = None,
+) -> Optional[str]:
+    data = bodem_getfeatureinfo(bbox, width, height, x, y, layer=layer, session=session)
+    feats = data.get("features", []) or []
+    if not feats:
+        return None
+    props = feats[0].get("properties") or {}
+    return bodem_label_from_properties(props, session=session)
+
+
+
+def download_bodemvlakken_with_dominant_legend(
     bbox: BBox,
     out_path: Path,
     *,
-    layer: str,
     px: int = 2000,
-    legend_via: str = "getlegendgraphic",
+    top_k: int = 6,
     session: Optional[requests.Session] = None,
 ) -> None:
     req = MapRequest(bbox=bbox, width=px, height=px, transparent=True)
-    img = wms_get_image(
+    base = wms_get_image(
         WMS_BODEM,
-        {**wms_base_params(req), "LAYERS": layer, "STYLES": ""},
+        {**wms_base_params(req), "LAYERS": "soilarea", "STYLES": ""},
         session=session,
     )
 
-    try:
-        try:
-            if legend_via == "capabilities":
-                raw_legend = wms_legend_from_capabilities(WMS_BODEM, layer, session=session)
-            else:
-                raw_legend = wms_getlegendgraphic(WMS_BODEM, layer, style="", session=session)
-        except Exception:
-            raw_legend = wms_legend_from_capabilities(WMS_BODEM, layer, session=session)
+    dominant = extract_dominant_colors(base, n=18, sample=6)
+    grouped: Dict[str, Dict[str, Any]] = {}
 
-        title_map = {
-            "soilarea": "Bodemvlakken",
-            "areaofpedologicalinterest": "Bodemkundig belang",
-        }
-        legend = extract_rows_from_vertical_legend(raw_legend, title=title_map.get(layer, "Bodem"))
+    for (rgb, frac) in dominant:
+        pt = find_representative_pixel(base, rgb, tol=12)
+        label = None
+        if pt is not None:
+            x, y = pt
+            label = bodem_label_at_pixel(bbox, px, px, x, y, layer="soilarea", session=session)
 
-        img = place_legend_on_image(
-            img,
-            legend,
-            position="bottom-right",
-            legend_scale=1.0,
-            legend_max_width_ratio=0.34,
-            add_white_box=False,
-        )
-    except Exception as e:
-        _log(f"[WARN] Bodem legenda ophalen mislukt ({layer}): {e}")
+        if label and "—" in label:
+            label = label.split("—", 1)[1].strip()
 
-    img.save(out_path)
+        label = label or "Onbekende bodemklasse"
+        bucket = grouped.setdefault(label, {"rgb": rgb, "pct": 0.0, "label": label})
+        bucket["pct"] += frac * 100.0
+
+    rows = sorted(grouped.values(), key=lambda r: float(r["pct"]), reverse=True)
+    rows = [r for r in rows if float(r["pct"]) >= 0.5][:top_k]
+
+    legend = build_pretty_legend(
+        rows,
+        title="Bodemvlakken",
+        subtitle="Dominante klassen binnen het geselecteerde gebied",
+        width=920,
+        show_percent=True,
+    )
+
+    out = place_legend_on_image(
+        base,
+        legend,
+        position="bottom-right",
+        legend_scale=1.0,
+        legend_max_width_ratio=0.48,
+        add_white_box=False,
+    )
+    out.save(out_path)
+
+
 
 def wdm_legend_image(layer: str, session: Optional[requests.Session] = None) -> Image.Image:
     return wms_legend_from_capabilities(WMS_WDM, layer, session=session)
@@ -1023,13 +1301,19 @@ def download_wdm(
                 "bro-grondwaterspiegeldieptemetingen-GLG": "Grondwaterstand (GLG)",
                 "bro-grondwaterspiegeldieptemetingen-GT": "Grondwatertrap (GT)",
             }.get(layer, "Grondwater")
-            legend = extract_rows_from_vertical_legend(raw_legend, title=nice_title)
+            legend = extract_rows_from_vertical_legend(
+                raw_legend,
+                title=nice_title,
+                max_width=1100,
+                max_height=900,
+                scale=1.65,
+            )
             img = place_legend_on_image(
                 img,
                 legend,
                 position="bottom-right",
                 legend_scale=1.0,
-                legend_max_width_ratio=0.34,
+                legend_max_width_ratio=0.58,
                 add_white_box=False,
             )
         except Exception as e:
@@ -1233,7 +1517,6 @@ def build_all_outputs(
     fn_wdm_glg = "wdm_glg.png"
     fn_wdm_gt = "wdm_gt.png"
     fn_bodemvlakken = "bodemvlakken.png"
-    fn_bodem_belang = "bodemkundig_belang.png"
 
     _log("[DL] Luchtfoto")
     download_luchtfoto(bbox, out_dir / fn_luchtfoto, px=px, session=session)
@@ -1271,8 +1554,7 @@ def build_all_outputs(
     download_wdm(bbox, out_dir / fn_wdm_gt, layer="bro-grondwaterspiegeldieptemetingen-GT", px=px, session=session)
 
     _log("[DL] Bodem")
-    download_bodem_layer(bbox, out_dir / fn_bodemvlakken, layer="soilarea", px=px, session=session)
-    download_bodem_layer(bbox, out_dir / fn_bodem_belang, layer="areaofpedologicalinterest", px=px, session=session)
+    download_bodemvlakken_with_dominant_legend(bbox, out_dir / fn_bodemvlakken, px=px, session=session)
 
     rasters = [
         ExportPlan(fn_topo, bbox_topo_for_dxf, "$$_00-00-00_onderlegger_Topokaart", default_on=False),
@@ -1287,7 +1569,6 @@ def build_all_outputs(
         ExportPlan(fn_ahn_dsm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DSM)", default_on=False),
         ExportPlan(fn_ahn_dtm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DTM)", default_on=False),
         ExportPlan(fn_bodemvlakken, bbox, "$$_00-00-00_onderlegger_Bodemvlakken", default_on=False),
-        ExportPlan(fn_bodem_belang, bbox, "$$_00-00-00_onderlegger_BodemkundigBelang", default_on=False),
     ]
 
     return rasters, bbox_topo_for_dxf
