@@ -1488,11 +1488,29 @@ def export_dxf(
                 _log(f"[WARN] Kon BGT toggle scripts niet schrijven: {e}")
 
     return out_dxf
+# =========================
+# Preview
+# =========================
 
+def preview_image(
+    bbox: BBox,
+    out_path: Path,
+    *,
+    px: int = 1000,
+    session: Optional[requests.Session] = None,
+) -> None:
+    req = MapRequest(bbox=bbox, width=px, height=px, transparent=False)
+    img = wms_get_image(
+        WMS_TOPO,
+        {**wms_base_params(req), "LAYERS": "top25raster", "STYLES": ""},
+        session=session,
+    )
+    img.save(out_path)
 
 # =========================
 # Main pipeline
 # =========================
+
 
 def build_all_outputs(
     bbox: BBox,
@@ -1598,7 +1616,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     out_dir = Path(args.outdir).resolve()
     _ensure_dir(out_dir)
-
+   
     session = requests.Session()
 
     if args.x is not None and args.y is not None:
@@ -1612,7 +1630,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     bbox = bbox_around_point(x, y, float(args.radius))
     _log(f"[BBOX] {bbox}")
-
+    
+    preview_image( bbox, out_dir / "preview_topo.png", px=1000, session=session) 
     rasters, _bbox_topo = build_all_outputs(
         bbox=bbox,
         out_dir=out_dir,

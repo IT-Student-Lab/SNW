@@ -45,7 +45,20 @@ with st.sidebar:
     st.header("Output")
     dxf_name = st.text_input("DXF bestandsnaam", value=DXF_DEFAULT_NAME)
 
+    preview_btn = st.button("Toon bbox preview")
     run_btn = st.button("Genereer onderlegger", type="primary")
+
+
+def get_bbox_from_input(mode, adres, x, y, radius, session):
+    if mode == "Adres":
+        if not adres.strip():
+            raise ValueError("Vul een adres in.")
+        cx, cy = gen.address_to_rd(adres, session=session)
+    else:
+        cx, cy = float(x), float(y)
+
+    bbox = gen.bbox_around_point(cx, cy, float(radius))
+    return cx, cy, bbox
 
 
 def zip_folder(folder: Path) -> bytes:
@@ -73,6 +86,42 @@ def list_output_files(folder: Path) -> list[Path]:
         return (pri, ext, str(p).lower())
     return sorted(files, key=key)
 
+if preview_btn:
+    try:
+        session = requests.Session()
+        cx, cy, bbox = get_bbox_from_input(mode, adres, x, y, radius, session)
+
+        st.subheader("BBOX preview")
+
+        with tempfile.TemporaryDirectory(prefix="pdok_preview_") as tmp:
+            preview_dir = Path(tmp)
+
+            # Alleen lichte preview maken, niet alles genereren
+            rasters, _ = gen.build_all_outputs(
+                bbox=bbox,
+                out_dir=preview_dir,
+                px=800,          # klein houden voor snelle preview
+                topo_px=1200,    # klein houden
+                topo_min_span_m=TOPO_MIN_SPAN_M,
+                session=session,
+            )
+
+            cols = st.columns(2)
+
+            luchtfoto = preview_dir / "Luchtfoto.png"
+            topo = preview_dir / "topo_kaart.png"
+
+            if luchtfoto.exists():
+                with cols[0]:
+                    st.image(str(luchtfoto), caption="Preview luchtfoto", width=350)
+
+            if topo.exists():
+                with cols[1]:
+                    st.image(str(topo), caption="Preview topo", width=350)
+
+    except Exception:
+        st.error("Er ging iets mis bij het maken van de preview.")
+        st.code("".join(traceback.format_exc()))
 
 if run_btn:
     with tempfile.TemporaryDirectory(prefix="pdok_onderlegger_") as tmp:
@@ -171,17 +220,6 @@ if run_btn:
                     key=f"dl-{rel_name}",
                 )
 
-            st.subheader("Preview (raster)")
-            preview_files = [
-                "Luchtfoto.png",
-                "luchtfoto_kadaster.png",
-                "topo_kaart.png",
-                "Bestemming_percelen.png",
-            ]
-            for fn in preview_files:
-                p = out_dir / fn
-                if p.exists():
-                    st.image(str(p), caption=fn, use_container_width=True)
 
         except Exception:
             st.error("Er ging iets mis tijdens genereren.")
