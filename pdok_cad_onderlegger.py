@@ -1384,6 +1384,18 @@ def bgt_list_collections(session: Optional[requests.Session] = None) -> List[str
     cols = r.json().get("collections", []) or []
     return [c["id"] for c in cols if "id" in c]
 
+def add_tree_symbol(msp, x: float, y: float, layer: str, size: float = 1.5) -> None:
+    # Buitenste kroon
+    msp.add_circle((x, y), radius=size, dxfattribs={"layer": layer})
+
+    # Drie kleinere cirkels erin voor een boom-symbool
+    r_small = size * 0.55
+    offset = size * 0.45
+
+    msp.add_circle((x - offset, y), radius=r_small, dxfattribs={"layer": layer})
+    msp.add_circle((x + offset, y), radius=r_small, dxfattribs={"layer": layer})
+    msp.add_circle((x, y + offset), radius=r_small, dxfattribs={"layer": layer})
+
 
 def add_all_bgt_to_dxf(
     doc: ezdxf.EzDxf,
@@ -1394,11 +1406,18 @@ def add_all_bgt_to_dxf(
 ) -> None:
     col_ids = bgt_list_collections(session=session)
     _log(f"[BGT] collections: {len(col_ids)}")
+    _log(f"[BGT] collection ids: {col_ids}")
 
     colors = [1, 2, 3, 4, 5, 6, 7]
+
     for idx, cid in enumerate(col_ids):
         layer = safe_layer_name(cid, prefix="BGT-")
-        ensure_layer_onoff(doc, layer, default_on=False, color=colors[idx % len(colors)])
+        ensure_layer_onoff(
+            doc,
+            layer,
+            default_on=False,
+            color=colors[idx % len(colors)],
+        )
 
         feats = ogc_get_all_features(
             BGT_OGC,
@@ -1409,12 +1428,31 @@ def add_all_bgt_to_dxf(
             limit=limit_per_collection,
             session=session,
         )
+
+        seen_geom_types = set()
+        _log(f"[BGT] {cid}: {len(feats)} features")
+
         for f in feats:
             g = f.get("geometry")
             if not g:
                 continue
+
             geom = shape(g)
-            add_any_geom_to_dxf(msp, geom, layer=layer)
+            seen_geom_types.add(geom.geom_type)
+
+            # Boom-/vegetatiepunten als leesbaar symbool tekenen
+            if cid == "vegetatieobject_punt" and geom.geom_type == "Point":
+                add_tree_symbol(msp, geom.x, geom.y, layer=layer, size=1.5)
+
+            elif cid == "vegetatieobject_punt" and geom.geom_type == "MultiPoint":
+                for pt in geom.geoms:
+                    add_tree_symbol(msp, pt.x, pt.y, layer=layer, size=1.5)
+
+            else:
+                add_any_geom_to_dxf(msp, geom, layer=layer)
+
+        _log(f"[BGT] {cid}: geom types = {sorted(seen_geom_types)}")
+
 
 
 def add_kadaster_percelen_to_dxf(

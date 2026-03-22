@@ -194,7 +194,7 @@ if run_btn:
             )
 
             # ✅ Alternatief: losse downloads (geen zip)
-            st.caption("Geen zip? Download hieronder losse bestanden (DXF + PNG’s).")
+            st.caption("losse bestanden (DXF + PNG’s).")
 
             files = list_output_files(out_dir)
             for p in files:
