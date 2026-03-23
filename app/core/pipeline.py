@@ -24,7 +24,6 @@ from app.core.downloads import (
 )
 from app.core.dxf import (
     add_georef_image_to_doc,
-    add_layer_filter_groups,
     ensure_layer_onoff,
     write_layer_toggle_scripts,
 )
@@ -225,8 +224,6 @@ def export_dxf(
             limit_per_collection=bgt_limit_per_collection,
             session=session,
         )
-
-    add_layer_filter_groups(doc)
 
     doc.saveas(out_dxf)
 
