@@ -133,6 +133,49 @@ def add_georef_image_to_doc(
         pass
 
 
+def add_layer_filter_groups(doc) -> None:
+    """Create layer filter groups: 'Onderlegger BGT' and 'Onderlegger kaarten'.
+
+    Uses LAYER_FILTER DXF objects stored in the LAYER table's extension
+    dictionary under 'ACAD_LAYERFILTERS'.
+    """
+    bgt_handles = []
+    kaarten_handles = []
+
+    for layer in doc.layers:
+        name = layer.dxf.name
+        handle = layer.dxf.handle
+        if name.startswith("BGT-"):
+            bgt_handles.append(handle)
+        elif name.startswith("$$_") or name == "01_KAD_PERCELEN":
+            kaarten_handles.append(handle)
+
+    if not bgt_handles and not kaarten_handles:
+        return
+
+    lt_head = doc.tables.layers.head
+    if not lt_head.has_extension_dict:
+        ext_dict = lt_head.new_extension_dict()
+    else:
+        ext_dict = lt_head.get_extension_dict()
+
+    filter_dict = ext_dict.add_dictionary("ACAD_LAYERFILTERS")
+
+    if bgt_handles:
+        bgt_filter = doc.objects.new_entity(
+            "LAYER_FILTER", {"owner": filter_dict.dxf.handle}
+        )
+        bgt_filter.handles = bgt_handles
+        filter_dict["Onderlegger BGT"] = bgt_filter
+
+    if kaarten_handles:
+        kaarten_filter = doc.objects.new_entity(
+            "LAYER_FILTER", {"owner": filter_dict.dxf.handle}
+        )
+        kaarten_filter.handles = kaarten_handles
+        filter_dict["Onderlegger kaarten"] = kaarten_filter
+
+
 def write_layer_toggle_scripts(
     doc, dxf_out: Path, prefix: str = "BGT-"
 ) -> Tuple[Path, Path]:
