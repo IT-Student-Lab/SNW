@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.git/
+.gitignore
+.env.example
+*.md
+*.dxf
+output_onderlegger/
+app_old.py
+pdok_cad_onderlegger_old.py

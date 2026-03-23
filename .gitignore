@@ -1,5 +1,32 @@
-*.venv
-*.png
-*.ipynb_checkpoints
+# Dependencies
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment / Secrets
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Output artifacts
+output_onderlegger/
 *.dxf
-*.env
+*.gpkg
+
+# Notebooks
+*.ipynb_checkpoints
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Old files (pre-restructure)
+app_old.py
+pdok_cad_onderlegger_old.py
+
+# Docker files for now
+Dockerfile
+docker-compose.yml
