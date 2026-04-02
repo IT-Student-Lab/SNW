@@ -28,5 +28,5 @@ app_old.py
 pdok_cad_onderlegger_old.py
 
 # Docker files for now
-Dockerfile
-docker-compose.yml
+#Dockerfile
+#docker-compose.yml
