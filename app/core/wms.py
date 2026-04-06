@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""WMS client helpers."""
+"""WMS/WCS client helpers."""
 
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from io import BytesIO
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import requests
 from PIL import Image
 
 from app.core.log_config import get_logger
-from app.core.types import MapRequest
+from app.core.types import BBox, MapRequest
 from app.core.utils import bbox_str
 
 logger = get_logger(__name__)
@@ -143,3 +144,114 @@ def wms_legend_from_capabilities(
         return Image.open(BytesIO(r.content)).convert("RGBA")
 
     raise ValueError(f"Layer {layer!r} niet gevonden in GetCapabilities")
+
+
+# --------------- WCS helpers for AHN dynamic visualisation ---------------
+
+def wcs_get_elevation_stats(
+    wcs_url: str,
+    coverage_id: str,
+    bbox: BBox,
+    *,
+    sample_size: int = 200,
+    session: Optional[requests.Session] = None,
+) -> Tuple[float, float]:
+    """Fetch a small elevation sample via WCS and return (min, max).
+
+    Uses 2nd / 98th percentiles to ignore nodata outliers.
+    """
+    s = session or requests.Session()
+    minx, miny, maxx, maxy = bbox
+
+    params = [
+        ("SERVICE", "WCS"),
+        ("REQUEST", "GetCoverage"),
+        ("VERSION", "2.0.1"),
+        ("CoverageId", coverage_id),
+        ("FORMAT", "image/tiff"),
+        ("SUBSET", f"x({minx},{maxx})"),
+        ("SUBSET", f"y({miny},{maxy})"),
+        ("SCALESIZE", f"x({sample_size}),y({sample_size})"),
+    ]
+
+    try:
+        r = s.get(wcs_url, params=params, timeout=60)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        logger.error("[ERROR_API_WCS] GetCoverage failed for %s: %s", wcs_url, e)
+        raise
+
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    if "tiff" not in ctype and "image" not in ctype:
+        raise ValueError(
+            f"WCS response is not a TIFF. Content-Type: {ctype}\n"
+            f"First chars: {r.text[:400]}"
+        )
+
+    arr = np.array(Image.open(BytesIO(r.content)), dtype=np.float32)
+    valid = arr[(arr > -1000) & (arr < 1000)]
+    if valid.size == 0:
+        raise ValueError("Geen geldige hoogtepixels gevonden in WCS response")
+
+    lo = float(np.percentile(valid, 2))
+    hi = float(np.percentile(valid, 98))
+    return lo, hi
+
+
+# --------------- SLD generation for dynamic AHN colour ramp ---------------
+
+_AHN_COLOUR_RAMP = [
+    # (fraction 0..1, hex colour)
+    (0.00, "#1a3399"),
+    (0.10, "#2c7bb6"),
+    (0.22, "#abd9e9"),
+    (0.35, "#66c2a5"),
+    (0.48, "#d9ef8b"),
+    (0.58, "#ffffbf"),
+    (0.70, "#fee08b"),
+    (0.80, "#fdae61"),
+    (0.90, "#f46d43"),
+    (1.00, "#d73027"),
+]
+
+
+def build_ahn_sld(
+    layer: str, vmin: float, vmax: float
+) -> str:
+    """Build an SLD document with a colour ramp mapped to [vmin, vmax]."""
+    span = vmax - vmin
+    if span < 0.01:
+        span = 1.0
+
+    entries = []
+    for frac, colour in _AHN_COLOUR_RAMP:
+        q = round(vmin + frac * span, 3)
+        entries.append(
+            f'              <ColorMapEntry color="{colour}" quantity="{q}" '
+            f'label="{q:.1f} m"/>'
+        )
+    entries_xml = "\n".join(entries)
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<StyledLayerDescriptor version="1.0.0"\n'
+        '  xmlns="http://www.opengis.net/sld"\n'
+        '  xmlns:ogc="http://www.opengis.net/ogc"\n'
+        '  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        "  <NamedLayer>\n"
+        f"    <Name>{layer}</Name>\n"
+        "    <UserStyle>\n"
+        "      <Name>dynamic</Name>\n"
+        "      <FeatureTypeStyle>\n"
+        "        <Rule>\n"
+        "          <RasterSymbolizer>\n"
+        "            <ColorMap>\n"
+        f"{entries_xml}\n"
+        "            </ColorMap>\n"
+        "          </RasterSymbolizer>\n"
+        "        </Rule>\n"
+        "      </FeatureTypeStyle>\n"
+        "    </UserStyle>\n"
+        "  </NamedLayer>\n"
+        "</StyledLayerDescriptor>"
+    )

@@ -22,5 +22,14 @@ WMS_TOPO = "https://service.pdok.nl/brt/topraster/wms/v1_0"
 WMS_AHN = "https://service.pdok.nl/rws/ahn/wms/v1_0"
 WMS_WDM = "https://service.pdok.nl/bzk/bro-grondwaterspiegeldiepte/wms/v2_0"
 
+# Natura 2000 / Natuurnetwerk
+WMS_NATURA2000 = "https://service.pdok.nl/rvo/natura2000/wms/v1_0"
+
+# WCS endpoints
+WCS_AHN = "https://service.pdok.nl/rws/ahn/wcs/v1_0"
+
+# Topotijdreis (ArcGIS tile services from Kadaster)
+TOPOTIJDREIS_BASE = "https://tiles.arcgis.com/tiles/nSZVuSZjHpEZZbRo/arcgis/rest/services"
+
 # Local data
 BODEM_GPKG_PATH = Path("BRO-SGM-DownloadBodemkaart-V2024-01_1.gpkg")

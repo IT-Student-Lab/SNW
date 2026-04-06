@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 @dataclass
@@ -46,6 +46,11 @@ class Settings:
     )
     pexels_api_key: str = field(
         default_factory=lambda: os.getenv("PEXELS_API_KEY", "")
+    )
+
+    # OpenAI (for AI-powered quickscan analysis)
+    openai_api_key: str = field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY", "")
     )
 
 

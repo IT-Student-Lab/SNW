@@ -18,8 +18,11 @@ from app.core.downloads import (
     download_bodemvlakken_with_dominant_legend,
     download_gmk_with_dominant_legend,
     download_kadastrale_kaart,
+    download_ligging_breed,
     download_luchtfoto,
+    download_natura2000,
     download_topo_image,
+    download_topotijdreis,
     download_wdm,
 )
 from app.core.dxf import (
@@ -81,6 +84,9 @@ def build_all_outputs(
     fn_wdm_glg = "wdm_glg.png"
     fn_wdm_gt = "wdm_gt.png"
     fn_bodemvlakken = "bodemvlakken.png"
+    fn_natura2000 = "natura2000.png"
+    fn_ligging_topo = "ligging_topo_breed.png"
+    fn_ligging_lucht = "ligging_luchtfoto_breed.png"
 
     logger.info("[DL] Luchtfoto")
     download_luchtfoto(bbox, out_dir / fn_luchtfoto, px=px, session=session)
@@ -164,6 +170,44 @@ def build_all_outputs(
         bbox, out_dir / fn_bodemvlakken, px=px, session=session
     )
 
+    logger.info("[DL] Natura 2000")
+    try:
+        download_natura2000(
+            bbox, out_dir / fn_natura2000,
+            center=(cx, cy),
+            breed_radius=10_000.0,
+            px=px,
+            session=session,
+        )
+    except Exception as e:
+        logger.warning("Natura 2000 download mislukt: %s", e)
+
+    logger.info("[DL] Ligging breed (uitgezoomd)")
+    try:
+        download_ligging_breed(
+            bbox,
+            out_dir / fn_ligging_topo,
+            out_dir / fn_ligging_lucht,
+            center=(cx, cy),
+            breed_radius=1000.0,
+            px=px,
+            session=session,
+        )
+    except Exception as e:
+        logger.warning("Ligging breed download mislukt: %s", e)
+
+    logger.info("[DL] Topotijdreis (historische topokaarten)")
+    try:
+        download_topotijdreis(
+            bbox, out_dir,
+            years=[1900, 1950, 2000],
+            center=(cx, cy),
+            breed_radius=1000.0,
+            session=session,
+        )
+    except Exception as e:
+        logger.warning("Topotijdreis download mislukt: %s", e)
+
     rasters = [
         ExportPlan(fn_topo, bbox_topo_for_dxf, "$$_00-00-00_onderlegger_Topokaart", default_on=False),
         ExportPlan(fn_luchtfoto_kad, bbox, "$$_00-00-00_onderlegger_Luchtfoto met kadastrale kaart V5", default_on=False),
@@ -177,6 +221,7 @@ def build_all_outputs(
         ExportPlan(fn_ahn_dsm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DSM)", default_on=False),
         ExportPlan(fn_ahn_dtm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DTM)", default_on=False),
         ExportPlan(fn_bodemvlakken, bbox, "$$_00-00-00_onderlegger_Bodemvlakken", default_on=False),
+        ExportPlan(fn_natura2000, bbox, "$$_00-00-00_onderlegger_Natura2000", default_on=False),
     ]
 
     return rasters, bbox_topo_for_dxf

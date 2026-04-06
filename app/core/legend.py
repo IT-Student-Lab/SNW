@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.core.wms import _AHN_COLOUR_RAMP
+
 
 # --------------- text helpers ---------------
 
@@ -291,3 +293,101 @@ def find_representative_pixel(
             if abs(r - r0) <= tol and abs(g - g0) <= tol and abs(b - b0) <= tol:
                 return x, y
     return None
+
+
+# --------------- dynamic AHN gradient legend ---------------
+
+def _hex_to_rgb(h: str) -> Tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def build_ahn_dynamic_legend(
+    title: str,
+    vmin: float,
+    vmax: float,
+    *,
+    width: int = 920,
+    bar_height: int = 28,
+) -> Image.Image:
+    """Build a gradient-bar legend card for AHN showing the local value range."""
+    try:
+        font_title = ImageFont.truetype("arial.ttf", 24)
+        font_label = ImageFont.truetype("arial.ttf", 18)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_label = ImageFont.load_default()
+
+    pad = 22
+    header_h = 52
+    label_h = 30
+    num_ticks = 6
+    height = header_h + pad + bar_height + label_h + pad + 10
+
+    card = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    d = ImageDraw.Draw(card)
+
+    # card background
+    d.rounded_rectangle(
+        [5, 5, width - 1, height - 1], radius=16, fill=(0, 0, 0, 35)
+    )
+    d.rounded_rectangle(
+        [0, 0, width - 6, height - 6],
+        radius=16,
+        fill=(255, 255, 255, 238),
+        outline=(185, 185, 185, 180),
+        width=1,
+    )
+
+    # title
+    d.text((pad, 14), title, font=font_title, fill=(20, 20, 20, 255))
+    d.line(
+        (pad, header_h, width - pad - 6, header_h),
+        fill=(210, 210, 210, 255),
+        width=1,
+    )
+
+    # gradient bar
+    bar_x0 = pad
+    bar_x1 = width - pad - 8
+    bar_y0 = header_h + pad
+    bar_w = bar_x1 - bar_x0
+
+    colours = [(f, _hex_to_rgb(c)) for f, c in _AHN_COLOUR_RAMP]
+
+    for px_x in range(bar_w):
+        frac = px_x / max(bar_w - 1, 1)
+        # interpolate between the two surrounding stops
+        r, g, b = colours[-1][1]
+        for i in range(len(colours) - 1):
+            f0, c0 = colours[i]
+            f1, c1 = colours[i + 1]
+            if f0 <= frac <= f1:
+                t = (frac - f0) / max(f1 - f0, 1e-9)
+                r = int(c0[0] + t * (c1[0] - c0[0]))
+                g = int(c0[1] + t * (c1[1] - c0[1]))
+                b = int(c0[2] + t * (c1[2] - c0[2]))
+                break
+        x = bar_x0 + px_x
+        d.line([(x, bar_y0), (x, bar_y0 + bar_height)], fill=(r, g, b, 255))
+
+    # border around bar
+    d.rectangle(
+        [bar_x0, bar_y0, bar_x1, bar_y0 + bar_height],
+        outline=(100, 100, 100, 200),
+    )
+
+    # tick labels
+    tick_y = bar_y0 + bar_height + 4
+    span = vmax - vmin
+    for i in range(num_ticks):
+        frac = i / (num_ticks - 1)
+        val = vmin + frac * span
+        label = f"{val:.1f} m"
+        bbox = d.textbbox((0, 0), label, font=font_label)
+        tw = bbox[2] - bbox[0]
+        tx = bar_x0 + int(frac * bar_w) - tw // 2
+        tx = max(bar_x0, min(tx, bar_x1 - tw))
+        d.text((tx, tick_y), label, font=font_label, fill=(50, 50, 50, 255))
+
+    return card
