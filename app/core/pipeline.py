@@ -7,9 +7,10 @@ import argparse
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+import numpy as np
 import ezdxf
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.core.bgt import add_all_bgt_to_dxf, add_kadaster_percelen_to_dxf
 from app.core.downloads import (
@@ -27,7 +28,10 @@ from app.core.downloads import (
 )
 from app.core.dxf import (
     add_georef_image_to_doc,
+    create_doc,
+    create_layer_filter_groups,
     ensure_layer_onoff,
+    write_image_reload_script,
     write_layer_toggle_scripts,
 )
 from app.core.locatie import address_to_rd, bbox_around_point
@@ -39,6 +43,48 @@ from app.core.wms import wms_base_params, wms_get_image
 from app.core.constants import WMS_TOPO
 
 logger = get_logger(__name__)
+
+
+# --------------- Helpers: empty‑image check & placeholder ---------------
+
+_THEMATIC_RADIUS = 5000.0  # metres – wider bbox for scale‑dependent WMS layers
+
+
+def _is_image_empty(path: Path, threshold: float = 0.02) -> bool:
+    """Return *True* when <threshold of pixels carry actual map data.
+
+    Ignores fully‑transparent pixels AND near‑white pixels (background).
+    """
+    img = Image.open(path).convert("RGBA")
+    arr = np.array(img)
+    alpha = arr[:, :, 3]
+    rgb = arr[:, :, :3]
+    non_trivial = (alpha > 10) & ~np.all(rgb > 245, axis=2)
+    return float(non_trivial.sum()) / (arr.shape[0] * arr.shape[1]) < threshold
+
+
+def _save_no_data_placeholder(
+    path: Path, title: str, px: int = 2000
+) -> None:
+    """Overwrite *path* with a neutral 'geen data beschikbaar' image."""
+    img = Image.new("RGBA", (px, px), (245, 245, 245, 255))
+    draw = ImageDraw.Draw(img)
+    try:
+        font_title = ImageFont.truetype("arial.ttf", 48)
+        font_sub = ImageFont.truetype("arial.ttf", 32)
+    except OSError:
+        font_title = ImageFont.load_default(size=48)
+        font_sub = ImageFont.load_default(size=32)
+    draw.text(
+        (px // 2, px // 2 - 40), title,
+        fill=(100, 100, 100), font=font_title, anchor="mm",
+    )
+    draw.text(
+        (px // 2, px // 2 + 30),
+        "Geen data beschikbaar voor deze locatie",
+        fill=(150, 150, 150), font=font_sub, anchor="mm",
+    )
+    img.save(path)
 
 
 # --------------- Preview ---------------
@@ -116,6 +162,7 @@ def build_all_outputs(
     cx, cy = bbox_center(bbox)
     topo_radius = max(3000.0, topo_min_span_m / 2.0)
     bbox_topo_big = bbox_around_point(cx, cy, topo_radius)
+    bbox_thematic = bbox_around_point(cx, cy, _THEMATIC_RADIUS)
 
     topo_big = download_topo_image(bbox_topo_big, px=topo_px, session=session)
     topo_cropped = crop_image_to_bbox(
@@ -127,8 +174,12 @@ def build_all_outputs(
 
     _progress("Geomorfologische kaart ophalen…")
     download_gmk_with_dominant_legend(
-        bbox, out_dir / fn_gmk, px=px, session=session
+        bbox_thematic, out_dir / fn_gmk, px=px, session=session
     )
+    if _is_image_empty(out_dir / fn_gmk):
+        _save_no_data_placeholder(
+            out_dir / fn_gmk, "Geomorfologische kaart", px=px,
+        )
 
     _progress("Hoogtekaarten (AHN) ophalen…")
     download_ahn(
@@ -150,31 +201,47 @@ def build_all_outputs(
 
     _progress("Grondwaterstanden ophalen…")
     download_wdm(
-        bbox,
+        bbox_thematic,
         out_dir / fn_wdm_ghg,
         layer="bro-grondwaterspiegeldieptemetingen-GHG",
         px=px,
         session=session,
     )
+    if _is_image_empty(out_dir / fn_wdm_ghg):
+        _save_no_data_placeholder(
+            out_dir / fn_wdm_ghg, "Grondwaterstand (GHG)", px=px,
+        )
     download_wdm(
-        bbox,
+        bbox_thematic,
         out_dir / fn_wdm_glg,
         layer="bro-grondwaterspiegeldieptemetingen-GLG",
         px=px,
         session=session,
     )
+    if _is_image_empty(out_dir / fn_wdm_glg):
+        _save_no_data_placeholder(
+            out_dir / fn_wdm_glg, "Grondwaterstand (GLG)", px=px,
+        )
     download_wdm(
-        bbox,
+        bbox_thematic,
         out_dir / fn_wdm_gt,
         layer="bro-grondwaterspiegeldieptemetingen-GT",
         px=px,
         session=session,
     )
+    if _is_image_empty(out_dir / fn_wdm_gt):
+        _save_no_data_placeholder(
+            out_dir / fn_wdm_gt, "Grondwatertrap (GT)", px=px,
+        )
 
     _progress("Bodemkaart ophalen…")
     download_bodemvlakken_with_dominant_legend(
-        bbox, out_dir / fn_bodemvlakken, px=px, session=session
+        bbox_thematic, out_dir / fn_bodemvlakken, px=px, session=session
     )
+    if _is_image_empty(out_dir / fn_bodemvlakken):
+        _save_no_data_placeholder(
+            out_dir / fn_bodemvlakken, "Bodemvlakken", px=px,
+        )
 
     _progress("Natura 2000 gegevens ophalen…")
     try:
@@ -195,7 +262,7 @@ def build_all_outputs(
             out_dir / fn_ligging_topo,
             out_dir / fn_ligging_lucht,
             center=(cx, cy),
-            breed_radius=1000.0,
+            breed_radius=3000.0,
             px=px,
             session=session,
         )
@@ -218,15 +285,15 @@ def build_all_outputs(
         ExportPlan(fn_topo, bbox_topo_for_dxf, "$$_00-00-00_onderlegger_Topokaart", default_on=False),
         ExportPlan(fn_luchtfoto_kad, bbox, "$$_00-00-00_onderlegger_Luchtfoto met kadastrale kaart V5", default_on=False),
         ExportPlan(fn_luchtfoto, bbox, "$$_00-00-00_onderlegger_Luchtfoto (actueel)", default_on=True),
-        ExportPlan(fn_wdm_ghg, bbox, "$$_00-00-00_onderlegger_Grondwaterstand (GHG)", default_on=False),
-        ExportPlan(fn_wdm_glg, bbox, "$$_00-00-00_onderlegger_Grondwaterstand (GLG)", default_on=False),
-        ExportPlan(fn_wdm_gt, bbox, "$$_00-00-00_onderlegger_Grondwaterstand (GT)", default_on=False),
-        ExportPlan(fn_gmk, bbox, "$$_00-00-00_onderlegger_Geomorfologische kaart", default_on=False),
+        ExportPlan(fn_wdm_ghg, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GHG)", default_on=False),
+        ExportPlan(fn_wdm_glg, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GLG)", default_on=False),
+        ExportPlan(fn_wdm_gt, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GT)", default_on=False),
+        ExportPlan(fn_gmk, bbox_thematic, "$$_00-00-00_onderlegger_Geomorfologische kaart", default_on=False),
         ExportPlan(fn_best_enkel, bbox, "$$_00-00-00_onderlegger_Bestemmingsplankaart (Enkelbestemming)", default_on=False),
         ExportPlan(fn_best_dubbel, bbox, "$$_00-00-00_onderlegger_Bestemmingsplankaart (Dubbelbestemming)", default_on=False),
         ExportPlan(fn_ahn_dsm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DSM)", default_on=False),
         ExportPlan(fn_ahn_dtm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DTM)", default_on=False),
-        ExportPlan(fn_bodemvlakken, bbox, "$$_00-00-00_onderlegger_Bodemvlakken", default_on=False),
+        ExportPlan(fn_bodemvlakken, bbox_thematic, "$$_00-00-00_onderlegger_Bodemvlakken", default_on=False),
         ExportPlan(fn_natura2000, bbox, "$$_00-00-00_onderlegger_Natura2000", default_on=False),
     ]
 
@@ -244,9 +311,10 @@ def export_dxf(
     include_percelen: bool = True,
     include_bgt: bool = True,
     bgt_limit_per_collection: int = 2000,
+    template_path: Optional[Path] = None,
     session: Optional[requests.Session] = None,
 ) -> Path:
-    doc = ezdxf.new(setup=True)
+    doc = create_doc(template_path)
     msp = doc.modelspace()
 
     for rp in rasters:
@@ -276,7 +344,14 @@ def export_dxf(
             session=session,
         )
 
+    create_layer_filter_groups(doc)
     doc.saveas(out_dxf)
+
+    try:
+        reload_scr = write_image_reload_script(out_dxf)
+        logger.info("AutoCAD reload script geschreven: %s", reload_scr)
+    except Exception as e:
+        logger.warning("Kon reload_images.scr niet schrijven: %s", e)
 
     if include_bgt:
         scr_on = out_dxf.parent / "toggle_BGT_AAN.scr"

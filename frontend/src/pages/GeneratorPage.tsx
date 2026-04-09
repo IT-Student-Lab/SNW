@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
 import "./GeneratorPage.css";
@@ -25,6 +25,9 @@ export default function GeneratorPage() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const debounce = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Whether a valid address was picked from suggestions
+  const [addressPicked, setAddressPicked] = useState(false);
+
   // Coords
   const [rdX, setRdX] = useState("");
   const [rdY, setRdY] = useState("");
@@ -37,6 +40,11 @@ export default function GeneratorPage() {
   const [generating, setGenerating] = useState(false);
   const [steps, setSteps] = useState<ProgressStep[]>([]);
   const [error, setError] = useState("");
+
+  // Preview
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewAbort = useRef<AbortController | null>(null);
 
   // PDOK suggest
   useEffect(() => {
@@ -61,7 +69,68 @@ export default function GeneratorPage() {
   const pickSuggestion = (s: Suggestion) => {
     setQuery(s.display_name);
     setSuggestions([]);
+    setAddressPicked(true);
   };
+
+  // Fetch preview map when location + radius are known
+  const fetchPreview = useCallback(async () => {
+    // Determine if we have enough info
+    const hasLocation =
+      (mode === "address" && addressPicked && query.length >= 3) ||
+      (mode === "coords" && rdX !== "" && rdY !== "");
+    if (!hasLocation) return;
+
+    previewAbort.current?.abort();
+    const ctrl = new AbortController();
+    previewAbort.current = ctrl;
+    setPreviewLoading(true);
+
+    try {
+      const body: Record<string, unknown> = {
+        mode,
+        radius: Number(radius),
+      };
+      if (mode === "address") {
+        body.address = query;
+      } else {
+        body.x = Number(rdX);
+        body.y = Number(rdY);
+      }
+
+      const token = localStorage.getItem("snw_token");
+      const resp = await fetch("/api/preview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+
+      if (!resp.ok) throw new Error("Preview mislukt");
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setPreviewUrl(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [mode, query, addressPicked, rdX, rdY, radius]);
+
+  // Debounced preview trigger
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(fetchPreview, 500);
+    return () => clearTimeout(previewTimer.current);
+  }, [fetchPreview]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -236,6 +305,7 @@ export default function GeneratorPage() {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
+                  setAddressPicked(false);
                 }}
               />
               {suggestions.length > 0 && (
@@ -287,6 +357,30 @@ export default function GeneratorPage() {
               onChange={(e) => setRadius(e.target.value)}
             />
           </div>
+
+          {/* Preview map */}
+          {(previewUrl || previewLoading) && (
+            <div className="preview-panel">
+              <label className="form-label">Preview geselecteerd gebied</label>
+              <div className="preview-img-wrap">
+                {previewLoading && (
+                  <div className="preview-spinner">
+                    <div className="spinner" />
+                  </div>
+                )}
+                {previewUrl && (
+                  <img
+                    src={previewUrl}
+                    alt="Preview van het geselecteerde gebied"
+                    className="preview-img"
+                  />
+                )}
+              </div>
+              <p className="preview-hint">
+                Het rode kader toont het geselecteerde gebied ({radius}m straal)
+              </p>
+            </div>
+          )}
 
           {/* DXF name */}
           <div className="form-group">

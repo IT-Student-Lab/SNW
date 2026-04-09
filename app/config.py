@@ -27,9 +27,14 @@ class Settings:
         default_factory=lambda: os.getenv("OUTPUT_DIR", "output_onderlegger")
     )
 
+    # Template
+    template_dir: str = field(
+        default_factory=lambda: os.getenv("TEMPLATE_DIR", "templates")
+    )
+
     # Cleanup
     cleanup_max_age_hours: float = field(
-        default_factory=lambda: float(os.getenv("CLEANUP_MAX_AGE_HOURS", "24"))
+        default_factory=lambda: float(os.getenv("CLEANUP_MAX_AGE_HOURS", "0"))
     )
     cleanup_interval_minutes: int = field(
         default_factory=lambda: int(os.getenv("CLEANUP_INTERVAL_MINUTES", "30"))

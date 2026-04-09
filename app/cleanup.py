@@ -23,6 +23,9 @@ def cleanup_old_files() -> int:
     if not output_dir.exists():
         return 0
 
+    if settings.cleanup_max_age_hours <= 0:
+        return 0
+
     max_age_seconds = settings.cleanup_max_age_hours * 3600
     now = time.time()
     removed = 0

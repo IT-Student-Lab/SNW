@@ -32,21 +32,29 @@
 .topbar-nav {
   display: flex;
   gap: var(--space-md);
-  flex: 1;
 }
 
 .topbar-nav a {
-  font-weight: 600;
-  font-size: 0.9rem;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  text-decoration: none;
   color: var(--snw-dark);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+  transition: border-color 0.15s;
 }
 
-.topbar-nav a:hover,
+.topbar-nav a:hover {
+  border-bottom-color: var(--snw-peach);
+}
+
 .topbar-nav a.active {
-  background: var(--snw-green);
-  color: var(--snw-white);
+  color: var(--snw-green);
+  border-bottom-color: var(--snw-green);
+}
+
+.topbar-spacer {
+  flex: 1;
 }
 
 .topbar-user {
@@ -66,4 +74,47 @@
   flex: 1;
   padding-top: var(--space-xl);
   padding-bottom: var(--space-xl);
+}
+
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal-card {
+  background: var(--snw-white);
+  border-radius: var(--radius-md);
+  padding: var(--space-xl) var(--space-lg);
+  max-width: 420px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-card h2 {
+  margin: 0 0 var(--space-md);
+  font-size: 1.1rem;
+  color: var(--snw-dark);
+}
+
+.modal-card .form-group {
+  margin-bottom: var(--space-sm);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.success-msg {
+  color: var(--snw-green);
+  font-size: 0.85rem;
+  margin: var(--space-sm) 0;
 }

@@ -9,16 +9,13 @@ from pathlib import Path
 import requests as http_requests
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from PIL import Image, ImageDraw
 
 from api.deps import get_current_user
 from api.models import PreviewRequest
-from app.core import address_to_rd_full, bbox_around_point, build_all_outputs
+from app.core import address_to_rd_full, bbox_around_point, preview_image
 
 router = APIRouter(prefix="/api", tags=["preview"])
-
-_PREVIEW_PX = 800
-_PREVIEW_TOPO_PX = 1200
-_TOPO_MIN_SPAN_M = 3000.0
 
 
 @router.post("/preview")
@@ -26,7 +23,7 @@ async def preview(
     req: PreviewRequest,
     _user: str = Depends(get_current_user),
 ):
-    """Generate a quick preview image and return it as PNG."""
+    """Generate a quick topo preview image and return it as PNG."""
     session = http_requests.Session()
 
     try:
@@ -40,30 +37,33 @@ async def preview(
                 raise HTTPException(400, "x en y coördinaten zijn verplicht.")
             cx, cy = req.x, req.y
 
-        bbox = bbox_around_point(cx, cy, req.radius)
+        # Use a wider bbox so top25raster actually renders at small radii
+        preview_radius = max(req.radius, 3000.0)
+        bbox = bbox_around_point(cx, cy, preview_radius)
 
-        # Use a temp dir that stays alive until response is sent
         tmp = tempfile.mkdtemp(prefix="pdok_preview_")
-        preview_dir = Path(tmp)
+        out = Path(tmp) / "preview.png"
+        px = 800
+        preview_image(bbox, out, px=px, session=session)
 
-        build_all_outputs(
-            bbox=bbox,
-            out_dir=preview_dir,
-            px=_PREVIEW_PX,
-            topo_px=_PREVIEW_TOPO_PX,
-            topo_min_span_m=_TOPO_MIN_SPAN_M,
-            session=session,
-        )
-
-        # Prefer luchtfoto, fallback to topo
-        luchtfoto = preview_dir / "Luchtfoto.png"
-        topo = preview_dir / "topo_kaart.png"
-        img = luchtfoto if luchtfoto.exists() else topo
-
-        if not img.exists():
+        if not out.exists():
             raise HTTPException(500, "Preview kon niet worden gegenereerd.")
 
-        return FileResponse(img, media_type="image/png")
+        # Draw a red rectangle showing the actual selected area
+        if preview_radius > req.radius:
+            img = Image.open(out).convert("RGBA")
+            draw = ImageDraw.Draw(img)
+            frac = req.radius / preview_radius
+            half = (px * frac) / 2
+            cx_px, cy_px = px / 2, px / 2
+            rect = (
+                cx_px - half, cy_px - half,
+                cx_px + half, cy_px + half,
+            )
+            draw.rectangle(rect, outline="red", width=3)
+            img.save(out)
+
+        return FileResponse(out, media_type="image/png")
 
     except HTTPException:
         raise

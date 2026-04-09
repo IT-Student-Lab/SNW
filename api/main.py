@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import auth, files, generate, geocoding, preview, quickscan
+from api.routers import auth, files, generate, geocoding, jobs, preview, quickscan, templates
 from app.cleanup import start_cleanup_scheduler
 from app.core.log_config import setup_logging
 from app.config import settings
@@ -54,7 +54,9 @@ app.include_router(geocoding.router)
 app.include_router(generate.router)
 app.include_router(preview.router)
 app.include_router(files.router)
+app.include_router(jobs.router)
 app.include_router(quickscan.router)
+app.include_router(templates.router)
 
 
 @app.get("/health")

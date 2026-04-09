@@ -5,11 +5,41 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import ezdxf
 from PIL import Image
 from shapely.geometry import shape
+
+# --------------- Default SNW layer structure ---------------
+
+SNW_DEFAULT_LAYERS: List[str] = [
+    "00 HUIDIGE SITUATIE",
+    "05 EXTERNE DOCUMENTEN",
+    "10 OPRUIMEN AFVOEREN",
+    "20 GRONDWERK",
+    "30 VERHARDINGEN",
+    "40 BEPLANTING",
+    "50 BOUWKUNDIG",
+    "60 ELECTRA",
+    "70 IRRIGATIE",
+    "80 ERFSCHEIDING",
+    "95 MAATVOERING",
+    "96 OVERIG",
+    "98 PRESENTATIE",
+    "999 DETAILS",
+]
+
+
+def create_doc(template_path: Optional[Path] = None):
+    """Create a DXF document from a template or with default SNW layers."""
+    if template_path and template_path.is_file():
+        doc = ezdxf.readfile(str(template_path))
+    else:
+        doc = ezdxf.new(setup=True)
+        for name in SNW_DEFAULT_LAYERS:
+            ensure_layer(doc, name, color=7)
+    return doc
 
 
 def ensure_layer(doc, name: str, *, color: int = 7) -> None:
@@ -133,6 +163,16 @@ def add_georef_image_to_doc(
         pass
 
 
+def write_image_reload_script(dxf_out: Path) -> Path:
+    """Generate an AutoCAD .scr that reloads all image xrefs."""
+    scr = dxf_out.parent / "reload_images.scr"
+    scr.write_text(
+        "-IMAGE\n_Reload\n*\n\n",
+        encoding="utf-8",
+    )
+    return scr
+
+
 def write_layer_toggle_scripts(
     doc, dxf_out: Path, prefix: str = "BGT-"
 ) -> Tuple[Path, Path]:
@@ -158,3 +198,49 @@ def write_layer_toggle_scripts(
     scr_on.write_text("\n".join(make_lines("ON")), encoding="utf-8")
     scr_off.write_text("\n".join(make_lines("OFF")), encoding="utf-8")
     return scr_on, scr_off
+
+
+def create_layer_filter_groups(doc) -> None:
+    """Add AutoCAD-compatible layer filter groups for BGT and kaarten layers."""
+    bgt_layers = [
+        lyr.dxf.name for lyr in doc.layers if lyr.dxf.name.startswith("BGT-")
+    ]
+    kaart_layers = [
+        lyr.dxf.name for lyr in doc.layers if lyr.dxf.name.startswith("$$_")
+    ]
+
+    if not bgt_layers and not kaart_layers:
+        return
+
+    # Build AutoCAD LAYER_FILTER_MANAGER via .scr script approach is unreliable.
+    # Use ezdxf group filter dictionaries instead.
+    try:
+        root_dict = doc.rootdict
+        if "ACAD_LAYERFILTERS" not in root_dict:
+            lf_dict = doc.objects.new_entity("DICTIONARY", {})
+            root_dict["ACAD_LAYERFILTERS"] = lf_dict
+        else:
+            lf_dict = root_dict["ACAD_LAYERFILTERS"]
+
+        # Create group filter entries for BGT
+        if bgt_layers:
+            _add_group_filter(doc, lf_dict, "Onderlegger BGT", bgt_layers)
+        if kaart_layers:
+            _add_group_filter(doc, lf_dict, "Onderlegger kaarten", kaart_layers)
+    except Exception:
+        # Filter groups are cosmetic — don't fail the export
+        pass
+
+
+def _add_group_filter(doc, lf_dict, name: str, layers: List[str]) -> None:
+    """Add a single group filter to the ACAD_LAYERFILTERS dictionary."""
+    xrec = doc.objects.new_entity(
+        "XRECORD",
+        dxfattribs={"cloning": 1},
+    )
+    # Group filter XRECORD format: pairs of (8, layer_name) tags
+    tags = ezdxf.tags.Tags(
+        [ezdxf.tags.DXFTag(8, ln) for ln in layers]
+    )
+    xrec.tags = ezdxf.tags.Tags(list(xrec.tags) + list(tags))
+    lf_dict[name] = xrec

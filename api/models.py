@@ -22,10 +22,15 @@ class UserInfo(BaseModel):
     username: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
 # --------------- Generate ---------------
 
 class GenerateRequest(BaseModel):
-    mode: str = Field(..., pattern=r"^(address|coordinates)$")
+    mode: str = Field(..., pattern=r"^(address|coords|coordinates)$")
     address: str | None = None
     x: float | None = None
     y: float | None = None
@@ -41,7 +46,7 @@ class GenerateResponse(BaseModel):
 # --------------- Preview ---------------
 
 class PreviewRequest(BaseModel):
-    mode: str = Field(..., pattern=r"^(address|coordinates)$")
+    mode: str = Field(..., pattern=r"^(address|coords|coordinates)$")
     address: str | None = None
     x: float | None = None
     y: float | None = None

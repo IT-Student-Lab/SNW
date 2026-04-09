@@ -1,0 +1,108 @@
+.history-page h1 {
+  margin: 0;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.history-search {
+  max-width: 320px;
+}
+
+.history-empty {
+  color: #888;
+  text-align: center;
+  padding: var(--space-xl) 0;
+}
+
+/* Table */
+.history-table-wrap {
+  overflow-x: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.history-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--snw-peach);
+  color: var(--snw-dark);
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--snw-gray);
+  vertical-align: middle;
+}
+
+.history-table tbody tr:hover {
+  background: var(--snw-gray);
+}
+
+.col-date {
+  white-space: nowrap;
+  width: 150px;
+}
+
+.col-address {
+  min-width: 200px;
+}
+
+.col-radius {
+  white-space: nowrap;
+  text-align: center;
+  width: 80px;
+}
+
+.col-qs {
+  text-align: center;
+  width: 80px;
+}
+
+.col-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: var(--space-xs);
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-green {
+  background: var(--snw-green);
+  color: white;
+}
+
+.badge-gray {
+  background: #ddd;
+  color: #666;
+}
+
+/* Danger button */
+.btn-danger {
+  background: var(--snw-red);
+  color: white;
+  border-color: var(--snw-red);
+}
+
+.btn-danger:hover {
+  opacity: 0.85;
+}

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
@@ -11,15 +10,14 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
 from app.config import settings
+from api.users import verify_user
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    """Check username/password against configured credentials (timing-safe)."""
-    user_ok = hmac.compare_digest(username, settings.app_username)
-    pass_ok = hmac.compare_digest(password, settings.app_password)
-    return user_ok and pass_ok
+    """Check username/password against the user store."""
+    return verify_user(username, password)
 
 
 def create_access_token(username: str) -> str:

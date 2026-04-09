@@ -8,6 +8,8 @@ services:
       - "8009:8009"
     volumes:
       - output_data:/app/output_onderlegger
+      - template_data:/app/templates
+      - user_data:/app/data
     restart: unless-stopped
     depends_on:
       - db
@@ -34,4 +36,6 @@ services:
 
 volumes:
   output_data:
+  template_data:
+  user_data:
   pg_data:

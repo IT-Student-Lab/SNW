@@ -17,6 +17,7 @@ USAGE_LOG_PATH = Path(settings.output_dir) / "usage.jsonl"
 
 def track_generation(
     *,
+    job_id: str = "",
     user: str,
     address: str = "",
     x: float = 0.0,
@@ -27,6 +28,7 @@ def track_generation(
     """Append a single usage entry to the usage log."""
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "job_id": job_id,
         "user": user,
         "address": address,
         "x": x,

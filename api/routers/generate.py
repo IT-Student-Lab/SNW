@@ -7,6 +7,7 @@ import asyncio
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -35,6 +36,8 @@ _TOPO_MIN_SPAN_M = 3000.0
 _INCLUDE_PERCELEN = True
 _INCLUDE_BGT = True
 _BGT_LIMIT = 2000
+
+_ALLOWED_TEMPLATE_EXT = {".dwt", ".dwg"}
 
 _RD_X_MIN, _RD_X_MAX = 0.0, 300_000.0
 _RD_Y_MIN, _RD_Y_MAX = 300_000.0, 625_000.0
@@ -118,8 +121,18 @@ async def generate(
             )
 
             await queue.put(_sse_event("progress", {
-                "message": "DXF bestand samenstellen met kadaster- en BGT-data…",
+                "message": "DXF bestand samenstellen met kadaster- en BGT-data… (dit kan even duren)",
             }))
+
+            # Resolve custom template if available
+            template_path = None
+            tpl_dir = Path(settings.template_dir)
+            if tpl_dir.is_dir():
+                for ext in _ALLOWED_TEMPLATE_EXT:
+                    candidate = tpl_dir / f"custom_template{ext}"
+                    if candidate.is_file():
+                        template_path = candidate
+                        break
 
             await loop.run_in_executor(
                 None,
@@ -131,14 +144,31 @@ async def generate(
                     include_percelen=_INCLUDE_PERCELEN,
                     include_bgt=_INCLUDE_BGT,
                     bgt_limit_per_collection=_BGT_LIMIT,
+                    template_path=template_path,
                     session=session,
                 ),
             )
 
             success = True
 
+            # Persist job metadata for history
+            job_meta = {
+                "job_id": job_id,
+                "address": req.address or "",
+                "x": cx,
+                "y": cy,
+                "radius": req.radius,
+                "dxf_name": req.dxf_name,
+                "user": username,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            (out_dir / "job.json").write_text(
+                json.dumps(job_meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
             await queue.put(_sse_event("progress", {
-                "message": "DXF export gereed. AI-analyse starten…",
+                "message": "DXF export gereed. AI-analyse starten… (dit kan even duren)",
             }))
 
             # Auto-run quickscan
@@ -153,6 +183,13 @@ async def generate(
                         bbox=tuple(bbox),
                         session=session,
                     ),
+                )
+
+                # Cache to disk so PPTX export can reuse without AI re-run
+                qs_cache = out_dir / "quickscan.json"
+                qs_cache.write_text(
+                    json.dumps(qs_sections, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
                 )
 
                 await queue.put(_sse_event("quickscan", {
@@ -177,6 +214,7 @@ async def generate(
                 }))
             finally:
                 track_generation(
+                    job_id=job_id,
                     user=username,
                     address=req.address or "",
                     x=cx,

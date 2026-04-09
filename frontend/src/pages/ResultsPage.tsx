@@ -55,7 +55,8 @@ export default function ResultsPage() {
     address?: string;
     quickscanSections?: QuickscanSection[];
   } | null;
-  const address = locState?.address ?? "";
+
+  const [address, setAddress] = useState(locState?.address ?? "");
 
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
@@ -77,6 +78,29 @@ export default function ResultsPage() {
       .then((r) => setFiles(r.data.files))
       .catch(() => setFiles([]))
       .finally(() => setLoadingFiles(false));
+
+    // Load job metadata (address etc.) if not in navigation state
+    if (!address) {
+      api
+        .get(`/api/jobs/${jobId}`)
+        .then((r) => {
+          if (r.data.address) setAddress(r.data.address);
+          else if (r.data.x && r.data.y)
+            setAddress(`RD (${r.data.x.toFixed(0)}, ${r.data.y.toFixed(0)})`);
+        })
+        .catch(() => {});
+    }
+
+    // Load cached quickscan if not already in navigation state
+    if (!qsSections) {
+      api
+        .get(`/api/quickscan/${jobId}/cached`)
+        .then((r) => {
+          if (r.data.sections) setQsSections(r.data.sections);
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
   /** Download via axios (includes JWT) then trigger browser save */
@@ -134,11 +158,8 @@ export default function ResultsPage() {
     try {
       const res = await api.post(
         `/api/quickscan/${jobId}/export`,
-        null,
-        {
-          params: { address, radius: 250 },
-          responseType: "blob",
-        }
+        { sections: qsSections },
+        { responseType: "blob" }
       );
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
@@ -324,6 +345,15 @@ export default function ResultsPage() {
 
         {qsSections && (
           <div className="qs-results">
+            <button
+              className="btn btn-secondary"
+              onClick={exportPptx}
+              disabled={pptxLoading}
+              style={{ marginBottom: "var(--space-md)" }}
+            >
+              {pptxLoading ? "Exporteren…" : "Exporteer als PowerPoint (.pptx)"}
+            </button>
+
             {qsSections.map((s, i) =>
               isLocationInfo(s) ? (
                 <div key={i}>{renderLocationInfo(s)}</div>
@@ -331,15 +361,6 @@ export default function ResultsPage() {
                 <div key={i}>{renderAnalysisSection(s)}</div>
               )
             )}
-
-            <button
-              className="btn btn-secondary"
-              onClick={exportPptx}
-              disabled={pptxLoading}
-              style={{ marginTop: "var(--space-md)" }}
-            >
-              {pptxLoading ? "Exporteren…" : "Exporteer als PowerPoint (.pptx)"}
-            </button>
           </div>
         )}
       </section>
