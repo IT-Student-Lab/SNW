@@ -53,5 +53,14 @@ class Settings:
         default_factory=lambda: os.getenv("OPENAI_API_KEY", "")
     )
 
+    # JWT (for FastAPI auth)
+    jwt_secret_key: str = field(
+        default_factory=lambda: os.getenv("JWT_SECRET_KEY", "change-me-in-production")
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = field(
+        default_factory=lambda: int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
+    )
+
 
 settings = Settings()

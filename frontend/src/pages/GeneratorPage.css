@@ -1,0 +1,131 @@
+.generator-page h1 {
+  margin-bottom: var(--space-lg);
+}
+
+.generator-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.mode-toggle {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.coord-row {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.coord-row .form-group {
+  flex: 1;
+}
+
+/* Autocomplete dropdown */
+.autocomplete-wrapper {
+  position: relative;
+}
+
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--snw-white);
+  border: 1px solid #ccc;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+}
+
+.autocomplete-list li {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.autocomplete-list li:hover {
+  background: var(--snw-gray);
+}
+
+.autocomplete-list li strong {
+  color: var(--snw-green);
+  text-transform: capitalize;
+  margin-right: 4px;
+}
+
+/* Range slider */
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--snw-green);
+}
+
+/* Progress panel inside overlay */
+.progress-panel {
+  background: var(--snw-white);
+  border-radius: var(--radius-md);
+  padding: var(--space-xl) var(--space-lg);
+  max-width: 480px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.progress-panel h2 {
+  color: var(--snw-dark);
+  margin: var(--space-md) 0;
+  font-size: 1.1rem;
+}
+
+.progress-panel .spinner {
+  margin: 0 auto;
+}
+
+.progress-steps {
+  list-style: none;
+  text-align: left;
+  margin-top: var(--space-md);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.progress-steps li {
+  padding: 6px 0;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--snw-dark);
+}
+
+.progress-steps .step-icon {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.progress-steps .step-done {
+  color: var(--snw-green);
+}
+
+.progress-steps .step-done .step-icon {
+  color: var(--snw-green);
+}
+
+.progress-steps .step-active {
+  font-weight: 600;
+}
+
+.progress-steps .step-active .step-icon {
+  color: var(--snw-peach);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import ezdxf
 import requests
@@ -69,8 +69,14 @@ def build_all_outputs(
     topo_px: int = 4000,
     topo_min_span_m: float = 3000.0,
     session: Optional[requests.Session] = None,
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> Tuple[List[ExportPlan], Optional[BBox]]:
     ensure_dir(out_dir)
+
+    def _progress(msg: str) -> None:
+        logger.info(msg)
+        if on_progress:
+            on_progress(msg)
 
     fn_luchtfoto = "Luchtfoto.png"
     fn_luchtfoto_kad = "luchtfoto_kadaster.png"
@@ -88,16 +94,16 @@ def build_all_outputs(
     fn_ligging_topo = "ligging_topo_breed.png"
     fn_ligging_lucht = "ligging_luchtfoto_breed.png"
 
-    logger.info("[DL] Luchtfoto")
+    _progress("Luchtfoto ophalen…")
     download_luchtfoto(bbox, out_dir / fn_luchtfoto, px=px, session=session)
 
-    logger.info("[DL] Kadastrale kaart (WMS)")
+    _progress("Kadastrale kaart samenvoegen met luchtfoto…")
     kad = download_kadastrale_kaart(bbox, px=px, session=session)
     lucht = Image.open(out_dir / fn_luchtfoto).convert("RGBA")
     lucht_plus = Image.alpha_composite(lucht, kad)
     lucht_plus.save(out_dir / fn_luchtfoto_kad)
 
-    logger.info("[DL] PLU (bestemmingsplan)")
+    _progress("Bestemmingsplan kaarten ophalen…")
     build_plu_outputs(
         bbox,
         out_dir / fn_best_enkel,
@@ -106,7 +112,7 @@ def build_all_outputs(
         session=session,
     )
 
-    logger.info("[DL] TOPraster")
+    _progress("Topokaart voorbereiden…")
     cx, cy = bbox_center(bbox)
     topo_radius = max(3000.0, topo_min_span_m / 2.0)
     bbox_topo_big = bbox_around_point(cx, cy, topo_radius)
@@ -119,12 +125,12 @@ def build_all_outputs(
 
     bbox_topo_for_dxf = bbox
 
-    logger.info("[DL] GMK")
+    _progress("Geomorfologische kaart ophalen…")
     download_gmk_with_dominant_legend(
         bbox, out_dir / fn_gmk, px=px, session=session
     )
 
-    logger.info("[DL] AHN DSM/DTM")
+    _progress("Hoogtekaarten (AHN) ophalen…")
     download_ahn(
         bbox,
         out_dir / fn_ahn_dsm,
@@ -142,7 +148,7 @@ def build_all_outputs(
         session=session,
     )
 
-    logger.info("[DL] WDM (grondwater)")
+    _progress("Grondwaterstanden ophalen…")
     download_wdm(
         bbox,
         out_dir / fn_wdm_ghg,
@@ -165,12 +171,12 @@ def build_all_outputs(
         session=session,
     )
 
-    logger.info("[DL] Bodem")
+    _progress("Bodemkaart ophalen…")
     download_bodemvlakken_with_dominant_legend(
         bbox, out_dir / fn_bodemvlakken, px=px, session=session
     )
 
-    logger.info("[DL] Natura 2000")
+    _progress("Natura 2000 gegevens ophalen…")
     try:
         download_natura2000(
             bbox, out_dir / fn_natura2000,
@@ -182,7 +188,7 @@ def build_all_outputs(
     except Exception as e:
         logger.warning("Natura 2000 download mislukt: %s", e)
 
-    logger.info("[DL] Ligging breed (uitgezoomd)")
+    _progress("Overzichtskaarten maken…")
     try:
         download_ligging_breed(
             bbox,
@@ -196,7 +202,7 @@ def build_all_outputs(
     except Exception as e:
         logger.warning("Ligging breed download mislukt: %s", e)
 
-    logger.info("[DL] Topotijdreis (historische topokaarten)")
+    _progress("Historische kaarten ophalen…")
     try:
         download_topotijdreis(
             bbox, out_dir,

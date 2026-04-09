@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+"""
+⚠️  DEPRECATED — Dit bestand is de oude Streamlit-interface.
+    De nieuwe frontend draait via React + FastAPI (zie api/ en frontend/).
+    Dit bestand wordt bewaard als referentie maar wordt niet meer actief gebruikt.
+"""
 """Streamlit web interface for the CAD Onderlegger generator."""
 
 from __future__ import annotations

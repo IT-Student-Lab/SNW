@@ -1,0 +1,104 @@
+
+Hier is het volledige migratieplan:
+
+---
+
+## Plan: Streamlit → Custom Frontend Migratie
+
+Migreer de Streamlit-app naar een professionele **React + FastAPI** architectuur in de huisstijl van Studio Nico Wissing. De bestaande core backend-logica blijft intact; we wikkelen er een FastAPI REST API omheen en bouwen een React/TypeScript frontend.
+
+---
+
+### Huisstijl — Design Tokens (afgeleid van logo + website)
+
+**Kleuren** (uit het logo):
+
+| Token | Hex | Gebruik |
+|---|---|---|
+| `--color-peach` | `#ECC9A0` | Accenten, hover states, tags |
+| `--color-green` | `#6B9B37` | Primary buttons, active nav |
+| `--color-blue` | `#A8C8DE` | Info badges, secondary accents |
+| `--color-dark` | `#333333` | Body text, headings |
+| `--color-gray` | `#F5F5F3` | Page background |
+| `--color-white` | `#FFFFFF` | Cards, inputs |
+
+**Typografie**: Montserrat (headings, 400/700 — matcht logo), Inter (body, 16px base)
+
+**Stijlprincipes** (afgeleid van nicowissing.com): veel witruimte, editorial layout, minimalistisch, logo prominent linksboven, footer met copyright + social links.
+
+---
+
+### Fase 1: FastAPI Backend *(blokkeert Fase 2)*
+
+1. **API skeleton** — `api/` folder met FastAPI app, CORS, routers
+2. **Auth** (`POST /api/auth/login` → JWT token) — hergebruik hmac-check uit auth.py, voeg `python-jose` toe
+3. **Generate** (`POST /api/generate`) — wrap `build_all_outputs()` + `export_dxf()` uit pipeline.py in Pydantic-gevalideerd endpoint
+4. **Preview** (`POST /api/preview`) — wrap `preview_image()`, return PNG als StreamingResponse
+5. **Files** (`GET /api/files/{job_id}`, `/zip`) — bestandslijst + download, hergebruik output folder structuur
+6. **Quickscan** (`POST /api/quickscan/{job_id}`) — extract OpenAI vision logic uit main.py naar eigen module
+7. **Geocoding** (`GET /api/geocode/suggest?q=...`) — wrap `address_to_rd()` uit locatie.py voor autocomplete
+8. **Health + Cleanup** — `/health` endpoint, cleanup scheduler als FastAPI lifespan event
+
+**Nieuwe deps**: `fastapi`, `uvicorn[standard]`, `python-jose[cryptography]`, `python-multipart`
+
+---
+
+### Fase 2: React Frontend *(parallel met Fase 1 tests)*
+
+1. **Setup** — `frontend/` met Vite + React + TS, Tailwind CSS, design tokens als CSS vars, Google Fonts
+2. **Layout** — Header (logo + nav + user menu), content area, footer (© Studio Nico Wissing)
+3. **Login pagina** — Minimalistisch formulier, logo erboven, JWT opslaan, AuthContext provider
+4. **Generator pagina** — Toggle Adres/RD, autocomplete (PDOK suggest), radius slider, preview knop, generate knop (groen, primary), loading spinner
+5. **Resultaten** — Bestanden als cards (DXF prominent, PNGs als thumbnails), ZIP download, individuele downloads
+6. **Quickscan** — Secties als accordion/tabbladen, kaartafbeelding + AI-analyse tekst
+7. **API client layer** — axios instance, JWT interceptor, typed API calls
+8. **Responsive** — Mobile-first, sidebar → drawer op mobile
+
+---
+
+### Fase 3: Integratie & Deployment
+
+1. **Dockerfile** — Multi-stage build (Node → build React, Python → FastAPI + deps, kopieer build output naar `/app/static/`)
+2. **Nginx** — `/api/` → FastAPI, `/` → static React, WebSocket config verwijderen, timeout 600s behouden
+3. **Docker Compose** — Port 8000 (uvicorn) i.p.v. 8501, `JWT_SECRET_KEY` env var toevoegen
+4. **Cleanup** — Streamlit uit requirements.txt verwijderen, main.py deprecated/verwijderd
+
+---
+
+### Relevante bestanden
+
+- pipeline.py — `build_all_outputs()`, `export_dxf()`, `preview_image()` → wrappen in API
+- locatie.py — `address_to_rd()` → geocoding endpoint
+- types.py — `BBox`, `MapRequest`, `ExportPlan` → hergebruik in Pydantic models
+- auth.py — hmac check → refactor naar JWT
+- config.py — settings → uitbreiden met JWT config
+- main.py — Quickscan OpenAI logic → extracten naar eigen module
+- Studio-Nico-Wissing_logo_1-11-2022-1030x333.png — kopiëren naar frontend
+
+---
+
+### Verificatie
+
+1. `pytest` tests voor elke API endpoint (auth flow, generate met mock, file download)
+2. Handmatige end-to-end test: login → adres → preview → genereer → download → quickscan
+3. `docker compose build && docker compose up` — alles start correct
+4. Nginx routing check: `/api/*` proxied, `/` serveert React
+5. JWT expiry en 401 unauthorized check
+6. Visuele vergelijking met nicowissing.com (kleuren, typografie, witruimte)
+7. Mobile responsive test (Chrome DevTools)
+8. `curl http://localhost/health` → `{"status": "ok"}`
+
+---
+
+### Beslissingen
+
+- React + Vite + TypeScript, FastAPI, JWT auth (HS256), synchrone generatie met spinner
+- CLI (cli.py) blijft functioneel als headless alternatief
+- PostgreSQL in docker-compose blijft beschikbaar voor toekomstig gebruik
+
+### Buiten scope
+
+- User management UI (registratie, wachtwoord reset)
+- Multi-user job concurrency
+- PWA features
+- Meertaligheid (app blijft Nederlands)

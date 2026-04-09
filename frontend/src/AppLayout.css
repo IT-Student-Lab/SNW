@@ -1,0 +1,69 @@
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ===== Top bar ===== */
+.topbar {
+  background: var(--snw-white);
+  border-bottom: 3px solid var(--snw-peach);
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.topbar-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 var(--space-md);
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.topbar-logo {
+  height: 36px;
+  object-fit: contain;
+}
+
+.topbar-nav {
+  display: flex;
+  gap: var(--space-md);
+  flex: 1;
+}
+
+.topbar-nav a {
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--snw-dark);
+}
+
+.topbar-nav a:hover,
+.topbar-nav a.active {
+  background: var(--snw-green);
+  color: var(--snw-white);
+}
+
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 0.8rem;
+}
+
+/* ===== Main ===== */
+.main-content {
+  flex: 1;
+  padding-top: var(--space-xl);
+  padding-bottom: var(--space-xl);
+}

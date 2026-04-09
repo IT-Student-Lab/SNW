@@ -1,0 +1,162 @@
+.results-page h1 {
+  margin-bottom: var(--space-xs);
+}
+
+.results-address {
+  color: #888;
+  margin-bottom: var(--space-lg);
+}
+
+.files-section,
+.quickscan-section {
+  margin-bottom: var(--space-lg);
+}
+
+.files-section h2,
+.quickscan-section h2 {
+  margin-bottom: var(--space-md);
+}
+
+/* File list */
+.file-list {
+  list-style: none;
+  margin-bottom: var(--space-md);
+}
+
+.file-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--snw-gray);
+}
+
+.file-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.file-size {
+  color: #999;
+  font-size: 0.8rem;
+  width: 80px;
+  text-align: right;
+}
+
+/* Quickscan */
+.qs-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.qs-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.qs-card {
+  border-left: 4px solid var(--snw-green);
+}
+
+.qs-card h3 {
+  margin-bottom: var(--space-sm);
+  color: var(--snw-green-dark);
+}
+
+.qs-analysis {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  margin-top: var(--space-sm);
+}
+
+.qs-images {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-top: var(--space-sm);
+}
+
+.qs-images figure {
+  max-width: 320px;
+}
+
+.qs-images img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.qs-images figcaption {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: var(--space-xs);
+  text-align: center;
+}
+
+.qs-img-placeholder {
+  width: 200px;
+  height: 120px;
+  background: var(--snw-gray);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Location info table */
+.qs-info-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.qs-info-table td {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--snw-gray);
+}
+
+.qs-info-table td:first-child {
+  font-weight: 600;
+  width: 120px;
+  color: #666;
+}
+
+/* Extra sections */
+.qs-extra {
+  margin-top: var(--space-md);
+}
+
+.qs-extra summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--snw-green-dark);
+}
+
+.qs-extra pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--snw-gray);
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin-top: var(--space-xs);
+}
+
+.qs-omgevingsvisie,
+.qs-history-web,
+.qs-wikimedia {
+  margin-top: var(--space-md);
+}
+
+.qs-omgevingsvisie h4,
+.qs-history-web h4,
+.qs-wikimedia h4 {
+  font-size: 0.9rem;
+  color: var(--snw-dark);
+  margin-bottom: var(--space-xs);
+}
