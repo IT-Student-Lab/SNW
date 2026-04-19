@@ -10,12 +10,14 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+import ezdxf
+
 from api.deps import get_current_user
 from app.config import settings
 
 router = APIRouter(prefix="/api/template", tags=["template"])
 
-_ALLOWED_EXT = {".dwt", ".dwg"}
+_ALLOWED_EXT = {".dxf"}
 _MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
@@ -62,7 +64,7 @@ async def upload_template(file: UploadFile, _user: str = Depends(get_current_use
     if ext not in _ALLOWED_EXT:
         raise HTTPException(
             400,
-            f"Ongeldig bestandstype '{ext}'. Gebruik .dwt of .dwg.",
+            f"Ongeldig bestandstype '{ext}'. Gebruik .dxf.",
         )
 
     data = await file.read()
@@ -77,6 +79,17 @@ async def upload_template(file: UploadFile, _user: str = Depends(get_current_use
 
     dest = _template_dir() / f"custom_template{ext}"
     dest.write_bytes(data)
+
+    # Validate that ezdxf can actually read the file
+    try:
+        ezdxf.readfile(str(dest))
+    except Exception:
+        os.remove(dest)
+        raise HTTPException(
+            400,
+            "Het bestand kon niet worden gelezen als geldig DXF. "
+            "Controleer of het een correct .dxf bestand is.",
+        )
 
     return JSONResponse(
         {"message": "Sjabloon geüpload", "filename": dest.name, "size": len(data)},
