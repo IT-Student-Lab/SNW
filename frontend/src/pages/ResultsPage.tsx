@@ -304,23 +304,35 @@ export default function ResultsPage() {
           <p>Geen bestanden gevonden.</p>
         ) : (
           <>
-            <ul className="file-list">
-              {files.map((f) => (
-                <li key={f.filename}>
-                  <span className="file-name">{f.filename}</span>
-                  <span className="file-size">{fmtSize(f.size_bytes)}</span>
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={() => downloadFile(f.filename)}
-                  >
-                    Download
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button className="btn btn-secondary" onClick={downloadZip}>
-              Download alles (ZIP)
-            </button>
+            {/* Primary download buttons */}
+            <div className="primary-downloads">
+              <button className="btn btn-primary" onClick={downloadZip}>
+                Download onderlegger (ZIP)
+              </button>
+            </div>
+            <p className="download-hint">
+              Het ZIP-bestand bevat het DXF-bestand{files.find((f) => f.extension === ".dwg") ? ", DWG-bestand" : ""} en
+              alle kaartafbeeldingen. Pak het uit in één map zodat de afbeeldingen
+              automatisch worden geladen in AutoCAD.
+            </p>
+
+            <details className="file-details">
+              <summary>Alle bestanden ({files.length})</summary>
+              <ul className="file-list">
+                {files.map((f) => (
+                  <li key={f.filename}>
+                    <span className="file-name">{f.filename}</span>
+                    <span className="file-size">{fmtSize(f.size_bytes)}</span>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => downloadFile(f.filename)}
+                    >
+                      Download
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
           </>
         )}
       </section>

@@ -7,13 +7,13 @@ import tempfile
 from pathlib import Path
 
 import requests as http_requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from PIL import Image, ImageDraw
 
 from api.deps import get_current_user
 from api.models import PreviewRequest
-from app.core import address_to_rd_full, bbox_around_point, preview_image
+from app.core import address_to_rd_full, bbox_around_point, preview_image, preview_luchtfoto
+from app.core.raster import crop_image_to_bbox
 
 router = APIRouter(prefix="/api", tags=["preview"])
 
@@ -21,9 +21,14 @@ router = APIRouter(prefix="/api", tags=["preview"])
 @router.post("/preview")
 async def preview(
     req: PreviewRequest,
+    layer: str = Query("luchtfoto", regex="^(topo|luchtfoto)$"),
     _user: str = Depends(get_current_user),
 ):
-    """Generate a quick topo preview image and return it as PNG."""
+    """Generate a quick preview image and return it as PNG.
+
+    ?layer=topo      — topokaart (top25raster)
+    ?layer=luchtfoto — luchtfoto (default)
+    """
     session = http_requests.Session()
 
     try:
@@ -37,31 +42,26 @@ async def preview(
                 raise HTTPException(400, "x en y coördinaten zijn verplicht.")
             cx, cy = req.x, req.y
 
-        # Use a wider bbox so top25raster actually renders at small radii
-        preview_radius = max(req.radius, 3000.0)
-        bbox = bbox_around_point(cx, cy, preview_radius)
-
+        bbox = bbox_around_point(cx, cy, req.radius)
         tmp = tempfile.mkdtemp(prefix="pdok_preview_")
         out = Path(tmp) / "preview.png"
         px = 800
-        preview_image(bbox, out, px=px, session=session)
+
+        if layer == "topo":
+            # top25raster has scale limits — fetch wider, then crop
+            preview_radius = max(req.radius, 1500.0)
+            bbox_wide = bbox_around_point(cx, cy, preview_radius)
+            preview_image(bbox_wide, out, px=px, session=session)
+            if preview_radius > req.radius and out.exists():
+                from PIL import Image
+                wide_img = Image.open(out)
+                cropped = crop_image_to_bbox(wide_img, bbox_render=bbox_wide, bbox_target=bbox)
+                cropped.save(out)
+        else:
+            preview_luchtfoto(bbox, out, px=px, session=session)
 
         if not out.exists():
             raise HTTPException(500, "Preview kon niet worden gegenereerd.")
-
-        # Draw a red rectangle showing the actual selected area
-        if preview_radius > req.radius:
-            img = Image.open(out).convert("RGBA")
-            draw = ImageDraw.Draw(img)
-            frac = req.radius / preview_radius
-            half = (px * frac) / 2
-            cx_px, cy_px = px / 2, px / 2
-            rect = (
-                cx_px - half, cy_px - half,
-                cx_px + half, cy_px + half,
-            )
-            draw.rectangle(rect, outline="red", width=3)
-            img.save(out)
 
         return FileResponse(out, media_type="image/png")
 

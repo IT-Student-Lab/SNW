@@ -67,5 +67,21 @@ class Settings:
         default_factory=lambda: int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
     )
 
+    # ODA File Converter path (for .dwt/.dwg support)
+    oda_fc_path: str = field(
+        default_factory=lambda: os.getenv("ODA_FILE_CONVERTER", "")
+    )
+
 
 settings = Settings()
+
+# Configure ezdxf to find ODA File Converter
+if settings.oda_fc_path:
+    import ezdxf
+    ezdxf.options.set("odafc-addon", "win_exec_path", settings.oda_fc_path)
+else:
+    # Auto-detect common Windows install locations
+    _oda_candidates = list(Path(r"C:\Program Files\ODA").glob("ODAFileConverter*/ODAFileConverter.exe"))
+    if _oda_candidates:
+        import ezdxf
+        ezdxf.options.set("odafc-addon", "win_exec_path", str(_oda_candidates[0]))

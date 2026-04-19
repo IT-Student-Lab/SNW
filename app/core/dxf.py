@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import ezdxf
+from ezdxf.addons import odafc
 from PIL import Image
 from shapely.geometry import shape
+
+from app.core.log_config import get_logger
+
+logger = get_logger(__name__)
 
 # --------------- Default SNW layer structure ---------------
 
@@ -31,14 +38,47 @@ SNW_DEFAULT_LAYERS: List[str] = [
 ]
 
 
+def _odafc_read(path: Path):
+    """Read a .dwg or .dwt file via ODA File Converter.
+
+    ODA FC does not recognise .dwt as a format, but .dwt is structurally
+    identical to .dwg, so we copy to a temp .dwg before converting.
+    """
+    if path.suffix.lower() == ".dwt":
+        tmp_dir = tempfile.mkdtemp(prefix="snw_dwt_")
+        tmp_dwg = Path(tmp_dir) / (path.stem + ".dwg")
+        shutil.copy2(path, tmp_dwg)
+        return odafc.readfile(str(tmp_dwg))
+    return odafc.readfile(str(path))
+
+
 def create_doc(template_path: Optional[Path] = None):
-    """Create a DXF document from a template or with default SNW layers."""
+    """Create a DXF document from a template or with default SNW layers.
+
+    Supports .dxf directly via ezdxf, and .dwt/.dwg via ODA File Converter.
+    """
     if template_path and template_path.is_file():
-        doc = ezdxf.readfile(str(template_path))
-    else:
-        doc = ezdxf.new(setup=True)
-        for name in SNW_DEFAULT_LAYERS:
-            ensure_layer(doc, name, color=7)
+        ext = template_path.suffix.lower()
+        if ext in (".dwt", ".dwg"):
+            if not odafc.is_installed():
+                logger.warning(
+                    "ODA File Converter niet geïnstalleerd — "
+                    "kan %s niet lezen, standaard sjabloon wordt gebruikt.",
+                    template_path.name,
+                )
+                return _new_default_doc()
+            doc = _odafc_read(template_path)
+        else:
+            doc = ezdxf.readfile(str(template_path))
+        return doc
+    return _new_default_doc()
+
+
+def _new_default_doc():
+    """Create a fresh DXF document with the default SNW layers."""
+    doc = ezdxf.new(setup=True)
+    for name in SNW_DEFAULT_LAYERS:
+        ensure_layer(doc, name, color=7)
     return doc
 
 
@@ -163,6 +203,21 @@ def add_georef_image_to_doc(
         pass
 
 
+def export_dwg_copy(dxf_path: Path) -> Optional[Path]:
+    """Convert a .dxf file to .dwg using ODA File Converter. Returns the .dwg path or None."""
+    if not odafc.is_installed():
+        logger.info("ODA File Converter niet geïnstalleerd — DWG export overgeslagen.")
+        return None
+    dwg_path = dxf_path.with_suffix(".dwg")
+    try:
+        odafc.convert(str(dxf_path), str(dwg_path))
+        logger.info("DWG export geslaagd: %s", dwg_path)
+        return dwg_path
+    except Exception as e:
+        logger.warning("DWG export mislukt: %s", e)
+        return None
+
+
 def write_image_reload_script(dxf_out: Path) -> Path:
     """Generate an AutoCAD .scr that reloads all image xrefs."""
     scr = dxf_out.parent / "reload_images.scr"
@@ -201,46 +256,55 @@ def write_layer_toggle_scripts(
 
 
 def create_layer_filter_groups(doc) -> None:
-    """Add AutoCAD-compatible layer filter groups for BGT and kaarten layers."""
-    bgt_layers = [
-        lyr.dxf.name for lyr in doc.layers if lyr.dxf.name.startswith("BGT-")
-    ]
-    kaart_layers = [
-        lyr.dxf.name for lyr in doc.layers if lyr.dxf.name.startswith("$$_")
-    ]
+    """Add AcLyLayerGroup filters to ACLYDICTIONARY (AutoCAD layer filter tree)."""
+    bgt_layers = [lyr for lyr in doc.layers if lyr.dxf.name.startswith("BGT-")]
+    onderlegger_layers = [lyr for lyr in doc.layers if lyr.dxf.name.startswith("01-")]
 
-    if not bgt_layers and not kaart_layers:
+    if not bgt_layers and not onderlegger_layers:
         return
 
-    # Build AutoCAD LAYER_FILTER_MANAGER via .scr script approach is unreliable.
-    # Use ezdxf group filter dictionaries instead.
     try:
-        root_dict = doc.rootdict
-        if "ACAD_LAYERFILTERS" not in root_dict:
-            lf_dict = doc.objects.new_entity("DICTIONARY", {})
-            root_dict["ACAD_LAYERFILTERS"] = lf_dict
+        # Get or create the ACLYDICTIONARY in the LAYER table extension dict
+        lt = doc.tables.layers
+        if lt.head.extension_dict is None:
+            lt.head.new_extension_dict()
+        xdict = lt.head.extension_dict
+
+        if "ACLYDICTIONARY" not in xdict:
+            acly = doc.objects.new_entity("DICTIONARY", {})
+            xdict["ACLYDICTIONARY"] = acly
         else:
-            lf_dict = root_dict["ACAD_LAYERFILTERS"]
+            acly = xdict["ACLYDICTIONARY"]
 
-        # Create group filter entries for BGT
+        if onderlegger_layers:
+            _add_acly_group_filter(doc, acly, "01 ONDERLEGGER", onderlegger_layers)
         if bgt_layers:
-            _add_group_filter(doc, lf_dict, "Onderlegger BGT", bgt_layers)
-        if kaart_layers:
-            _add_group_filter(doc, lf_dict, "Onderlegger kaarten", kaart_layers)
-    except Exception:
-        # Filter groups are cosmetic — don't fail the export
-        pass
+            _add_acly_group_filter(doc, acly, "02 BGT", bgt_layers)
+    except Exception as e:
+        logger.warning("Layer filter groups konden niet worden aangemaakt: %s", e)
 
 
-def _add_group_filter(doc, lf_dict, name: str, layers: List[str]) -> None:
-    """Add a single group filter to the ACAD_LAYERFILTERS dictionary."""
-    xrec = doc.objects.new_entity(
-        "XRECORD",
-        dxfattribs={"cloning": 1},
-    )
-    # Group filter XRECORD format: pairs of (8, layer_name) tags
-    tags = ezdxf.tags.Tags(
-        [ezdxf.tags.DXFTag(8, ln) for ln in layers]
-    )
-    xrec.tags = ezdxf.tags.Tags(list(xrec.tags) + list(tags))
-    lf_dict[name] = xrec
+def _add_acly_group_filter(doc, acly_dict, name: str, layers) -> None:
+    """Add an AcLyLayerGroup XRECORD to the ACLYDICTIONARY.
+
+    Format matches AutoCAD's native layer group filters:
+      code 1:   'AcLyLayerGroup'
+      code 90:  1
+      code 300: group name
+      code 330: handle of each layer table record (repeated)
+    """
+    from ezdxf.lldxf.tags import Tags
+    from ezdxf.lldxf.types import DXFTag
+
+    xrec = doc.objects.new_entity("XRECORD", dxfattribs={"cloning": 1})
+
+    group_tags = [
+        DXFTag(1, "AcLyLayerGroup"),
+        DXFTag(90, 1),
+        DXFTag(300, name),
+    ]
+    for lyr in layers:
+        group_tags.append(DXFTag(330, lyr.dxf.handle))
+
+    xrec.tags = Tags(list(xrec.tags) + group_tags)
+    acly_dict[name] = xrec

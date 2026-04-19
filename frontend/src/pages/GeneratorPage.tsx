@@ -42,7 +42,8 @@ export default function GeneratorPage() {
   const [error, setError] = useState("");
 
   // Preview
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTopoUrl, setPreviewTopoUrl] = useState<string | null>(null);
+  const [previewLuchtUrl, setPreviewLuchtUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewAbort = useRef<AbortController | null>(null);
 
@@ -98,27 +99,46 @@ export default function GeneratorPage() {
       }
 
       const token = localStorage.getItem("snw_token");
-      const resp = await fetch("/api/preview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
 
-      if (!resp.ok) throw new Error("Preview mislukt");
+      const [topoResp, luchtResp] = await Promise.all([
+        fetch("/api/preview?layer=topo", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        }),
+        fetch("/api/preview?layer=luchtfoto", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        }),
+      ]);
 
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return url;
-      });
+      if (topoResp.ok) {
+        const blob = await topoResp.blob();
+        const url = URL.createObjectURL(blob);
+        setPreviewTopoUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      }
+      if (luchtResp.ok) {
+        const blob = await luchtResp.blob();
+        const url = URL.createObjectURL(blob);
+        setPreviewLuchtUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      setPreviewUrl(null);
+      setPreviewTopoUrl(null);
+      setPreviewLuchtUrl(null);
     } finally {
       setPreviewLoading(false);
     }
@@ -358,27 +378,34 @@ export default function GeneratorPage() {
             />
           </div>
 
-          {/* Preview map */}
-          {(previewUrl || previewLoading) && (
+          {/* Preview maps */}
+          {(previewTopoUrl || previewLuchtUrl || previewLoading) && (
             <div className="preview-panel">
-              <label className="form-label">Preview geselecteerd gebied</label>
-              <div className="preview-img-wrap">
-                {previewLoading && (
-                  <div className="preview-spinner">
-                    <div className="spinner" />
+              <label className="form-label">Preview geselecteerd gebied ({radius}m straal)</label>
+              <div className="preview-grid">
+                <div className="preview-item">
+                  <span className="preview-label">Topokaart</span>
+                  <div className="preview-img-wrap">
+                    {previewLoading && !previewTopoUrl && (
+                      <div className="preview-spinner"><div className="spinner" /></div>
+                    )}
+                    {previewTopoUrl && (
+                      <img src={previewTopoUrl} alt="Topokaart preview" className="preview-img" />
+                    )}
                   </div>
-                )}
-                {previewUrl && (
-                  <img
-                    src={previewUrl}
-                    alt="Preview van het geselecteerde gebied"
-                    className="preview-img"
-                  />
-                )}
+                </div>
+                <div className="preview-item">
+                  <span className="preview-label">Luchtfoto</span>
+                  <div className="preview-img-wrap">
+                    {previewLoading && !previewLuchtUrl && (
+                      <div className="preview-spinner"><div className="spinner" /></div>
+                    )}
+                    {previewLuchtUrl && (
+                      <img src={previewLuchtUrl} alt="Luchtfoto preview" className="preview-img" />
+                    )}
+                  </div>
+                </div>
               </div>
-              <p className="preview-hint">
-                Het rode kader toont het geselecteerde gebied ({radius}m straal)
-              </p>
             </div>
           )}
 

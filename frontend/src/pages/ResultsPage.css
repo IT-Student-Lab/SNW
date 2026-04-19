@@ -18,6 +18,30 @@
 }
 
 /* File list */
+.primary-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.download-hint {
+  font-size: 0.82rem;
+  color: #777;
+  margin-bottom: var(--space-md);
+}
+
+.file-details {
+  margin-bottom: var(--space-md);
+}
+
+.file-details summary {
+  cursor: pointer;
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: var(--space-sm);
+}
+
 .file-list {
   list-style: none;
   margin-bottom: var(--space-md);

@@ -11,13 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 import ezdxf
+from ezdxf.addons import odafc
 
 from api.deps import get_current_user
 from app.config import settings
+from app.core.dxf import _odafc_read
 
 router = APIRouter(prefix="/api/template", tags=["template"])
 
-_ALLOWED_EXT = {".dxf"}
+_ALLOWED_EXT = {".dxf", ".dwt", ".dwg"}
 _MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
@@ -64,7 +66,7 @@ async def upload_template(file: UploadFile, _user: str = Depends(get_current_use
     if ext not in _ALLOWED_EXT:
         raise HTTPException(
             400,
-            f"Ongeldig bestandstype '{ext}'. Gebruik .dxf.",
+            f"Ongeldig bestandstype '{ext}'. Gebruik .dxf, .dwt of .dwg.",
         )
 
     data = await file.read()
@@ -80,15 +82,29 @@ async def upload_template(file: UploadFile, _user: str = Depends(get_current_use
     dest = _template_dir() / f"custom_template{ext}"
     dest.write_bytes(data)
 
-    # Validate that ezdxf can actually read the file
+    # Validate that the file can actually be read
     try:
-        ezdxf.readfile(str(dest))
-    except Exception:
+        if ext in (".dwt", ".dwg"):
+            if not odafc.is_installed():
+                raise HTTPException(
+                    400,
+                    "ODA File Converter is niet geïnstalleerd op de server. "
+                    "Upload een .dxf bestand, of installeer ODA File Converter "
+                    "voor .dwt/.dwg ondersteuning.",
+                )
+            _odafc_read(dest)
+        else:
+            ezdxf.readfile(str(dest))
+    except HTTPException:
+        os.remove(dest)
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
         os.remove(dest)
         raise HTTPException(
             400,
-            "Het bestand kon niet worden gelezen als geldig DXF. "
-            "Controleer of het een correct .dxf bestand is.",
+            f"Het bestand kon niet worden gelezen als geldig {ext} bestand.",
         )
 
     return JSONResponse(

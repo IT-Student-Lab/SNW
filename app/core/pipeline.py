@@ -31,6 +31,7 @@ from app.core.dxf import (
     create_doc,
     create_layer_filter_groups,
     ensure_layer_onoff,
+    export_dwg_copy,
     write_image_reload_script,
     write_layer_toggle_scripts,
 )
@@ -40,7 +41,7 @@ from app.core.raster import crop_image_to_bbox
 from app.core.types import BBox, ExportPlan, MapRequest
 from app.core.utils import bbox_center, ensure_dir
 from app.core.wms import wms_base_params, wms_get_image
-from app.core.constants import WMS_TOPO
+from app.core.constants import WMS_LUCHTFOTO, WMS_TOPO
 
 logger = get_logger(__name__)
 
@@ -100,6 +101,22 @@ def preview_image(
     img = wms_get_image(
         WMS_TOPO,
         {**wms_base_params(req), "LAYERS": "top25raster", "STYLES": ""},
+        session=session,
+    )
+    img.save(out_path)
+
+
+def preview_luchtfoto(
+    bbox: BBox,
+    out_path: Path,
+    *,
+    px: int = 1000,
+    session: Optional[requests.Session] = None,
+) -> None:
+    req = MapRequest(bbox=bbox, width=px, height=px, transparent=False)
+    img = wms_get_image(
+        WMS_LUCHTFOTO,
+        {**wms_base_params(req), "LAYERS": "Actueel_orthoHR", "STYLES": ""},
         session=session,
     )
     img.save(out_path)
@@ -244,11 +261,13 @@ def build_all_outputs(
         )
 
     _progress("Natura 2000 gegevens ophalen…")
+    n2k_radius = 10_000.0
+    bbox_natura2000 = bbox_around_point(cx, cy, n2k_radius)
     try:
         download_natura2000(
             bbox, out_dir / fn_natura2000,
             center=(cx, cy),
-            breed_radius=10_000.0,
+            breed_radius=n2k_radius,
             px=px,
             session=session,
         )
@@ -282,19 +301,19 @@ def build_all_outputs(
         logger.warning("Topotijdreis download mislukt: %s", e)
 
     rasters = [
-        ExportPlan(fn_topo, bbox_topo_for_dxf, "$$_00-00-00_onderlegger_Topokaart", default_on=False),
-        ExportPlan(fn_luchtfoto_kad, bbox, "$$_00-00-00_onderlegger_Luchtfoto met kadastrale kaart V5", default_on=False),
-        ExportPlan(fn_luchtfoto, bbox, "$$_00-00-00_onderlegger_Luchtfoto (actueel)", default_on=True),
-        ExportPlan(fn_wdm_ghg, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GHG)", default_on=False),
-        ExportPlan(fn_wdm_glg, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GLG)", default_on=False),
-        ExportPlan(fn_wdm_gt, bbox_thematic, "$$_00-00-00_onderlegger_Grondwaterstand (GT)", default_on=False),
-        ExportPlan(fn_gmk, bbox_thematic, "$$_00-00-00_onderlegger_Geomorfologische kaart", default_on=False),
-        ExportPlan(fn_best_enkel, bbox, "$$_00-00-00_onderlegger_Bestemmingsplankaart (Enkelbestemming)", default_on=False),
-        ExportPlan(fn_best_dubbel, bbox, "$$_00-00-00_onderlegger_Bestemmingsplankaart (Dubbelbestemming)", default_on=False),
-        ExportPlan(fn_ahn_dsm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DSM)", default_on=False),
-        ExportPlan(fn_ahn_dtm, bbox, "$$_00_00_00_onderlegger_Hoogtekaart (AHN 4 - DTM)", default_on=False),
-        ExportPlan(fn_bodemvlakken, bbox_thematic, "$$_00-00-00_onderlegger_Bodemvlakken", default_on=False),
-        ExportPlan(fn_natura2000, bbox, "$$_00-00-00_onderlegger_Natura2000", default_on=False),
+        ExportPlan(fn_topo, bbox_topo_for_dxf, "01-00-00-TOPOKAART", default_on=False),
+        ExportPlan(fn_luchtfoto_kad, bbox, "01-00-00-LUCHTFOTO_KADASTER", default_on=False),
+        ExportPlan(fn_luchtfoto, bbox, "01-00-00-LUCHTFOTO_PDOK", default_on=True),
+        ExportPlan(fn_wdm_ghg, bbox_thematic, "01-00-00-GRONDWATERSTAND_GHG", default_on=False),
+        ExportPlan(fn_wdm_glg, bbox_thematic, "01-00-00-GRONDWATERSTAND_GLG", default_on=False),
+        ExportPlan(fn_wdm_gt, bbox_thematic, "01-00-00-GRONDWATERTRAP_GT", default_on=False),
+        ExportPlan(fn_gmk, bbox_thematic, "01-00-00-GEOMORFOLOGISCHE_KAART", default_on=False),
+        ExportPlan(fn_best_enkel, bbox, "01-00-00-BESTEMMINGSPLAN_ENKEL", default_on=False),
+        ExportPlan(fn_best_dubbel, bbox, "01-00-00-BESTEMMINGSPLAN_DUBBEL", default_on=False),
+        ExportPlan(fn_ahn_dsm, bbox, "01-00-00-HOOGTEKAART_AHN_DSM", default_on=False),
+        ExportPlan(fn_ahn_dtm, bbox, "01-00-00-HOOGTEKAART_AHN_DTM", default_on=False),
+        ExportPlan(fn_bodemvlakken, bbox_thematic, "01-00-00-BODEMVLAKKEN", default_on=False),
+        ExportPlan(fn_natura2000, bbox_natura2000, "01-00-00-NATURA2000", default_on=False),
     ]
 
     return rasters, bbox_topo_for_dxf
@@ -346,6 +365,9 @@ def export_dxf(
 
     create_layer_filter_groups(doc)
     doc.saveas(out_dxf)
+
+    # Also export a .dwg copy if ODA File Converter is available
+    export_dwg_copy(out_dxf)
 
     try:
         reload_scr = write_image_reload_script(out_dxf)

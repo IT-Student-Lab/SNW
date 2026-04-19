@@ -33,8 +33,8 @@ export default function TemplatePage() {
     if (!file) return;
 
     const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-    if (ext !== ".dxf") {
-      setError("Alleen .dxf bestanden zijn toegestaan");
+    if (ext !== ".dxf" && ext !== ".dwt" && ext !== ".dwg") {
+      setError("Alleen .dwt, .dwg en .dxf bestanden zijn toegestaan");
       return;
     }
 
@@ -97,7 +97,7 @@ export default function TemplatePage() {
     <div className="container template-page">
       <h1>DXF Sjabloon</h1>
       <p className="template-subtitle">
-        Upload een AutoCAD sjabloon (.dxf) om de lagenstructuur van je
+        Upload een AutoCAD sjabloon (.dwt, .dwg of .dxf) om de lagenstructuur van je
         organisatie te gebruiken als basis voor gegenereerde DXF-bestanden.
       </p>
 
@@ -139,13 +139,13 @@ export default function TemplatePage() {
       <div className="card template-card">
         <h3>Nieuw sjabloon uploaden</h3>
         <p className="template-hint">
-          Dit vervangt het huidige sjabloon. Accepteert .dxf bestanden (max 50 MB).
+          Dit vervangt het huidige sjabloon. Accepteert .dwt, .dwg en .dxf bestanden (max 50 MB).
         </p>
         <div className="template-upload-row">
           <input
             ref={fileRef}
             type="file"
-            accept=".dxf"
+            accept=".dwt,.dwg,.dxf"
             className="template-file-input"
           />
           <button

@@ -137,10 +137,27 @@ input[type="range"] {
   gap: 6px;
 }
 
+.preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+.preview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preview-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+}
+
 .preview-img-wrap {
   position: relative;
   width: 100%;
-  max-width: 400px;
   aspect-ratio: 1;
   border-radius: var(--radius-sm);
   overflow: hidden;
