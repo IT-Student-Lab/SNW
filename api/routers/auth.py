@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.deps import create_access_token, get_current_user, verify_credentials
+from api.deps import create_access_token, create_download_token, get_current_user, verify_credentials
 from api.models import ChangePasswordRequest, LoginRequest, TokenResponse, UserInfo
 from api.users import change_password
 
@@ -21,6 +21,13 @@ async def login(body: LoginRequest):
         )
     token = create_access_token(body.username)
     return TokenResponse(access_token=token)
+
+
+@router.post("/download-token")
+async def download_token(username: str = Depends(get_current_user)):
+    """Issue a short-lived single-purpose token for browser-native downloads."""
+    token = create_download_token(username)
+    return {"token": token}
 
 
 @router.get("/me", response_model=UserInfo)

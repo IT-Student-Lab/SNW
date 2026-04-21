@@ -385,7 +385,7 @@ def _analyse_images(
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5.4-mini",
             messages=[{"role": "user", "content": content}],
             max_tokens=400,
             temperature=0.3,

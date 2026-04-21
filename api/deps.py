@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
@@ -27,6 +27,13 @@ def create_access_token(username: str) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def create_download_token(username: str) -> str:
+    """Create a short-lived JWT for browser-native file downloads (60s)."""
+    expire = datetime.now(timezone.utc) + timedelta(seconds=60)
+    payload = {"sub": username, "exp": expire, "purpose": "download"}
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     """FastAPI dependency: extract and validate the username from a JWT."""
     credentials_exception = HTTPException(
@@ -38,6 +45,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
         payload = jwt.decode(
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
+        username: str | None = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        return username
+    except JWTError:
+        raise credentials_exception
+
+
+async def get_download_user(token: str = Query(..., alias="token")) -> str:
+    """Validate a short-lived download token passed as a query parameter."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Ongeldige of verlopen download-token",
+    )
+    try:
+        payload = jwt.decode(
+            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+        )
+        if payload.get("purpose") != "download":
+            raise credentials_exception
         username: str | None = payload.get("sub")
         if username is None:
             raise credentials_exception

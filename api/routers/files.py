@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api.deps import get_current_user
+from api.deps import get_current_user, get_download_user
 from api.models import FileInfo, FileListResponse
 from app.config import settings
 
@@ -52,7 +52,7 @@ async def list_files(
 async def download_file(
     job_id: str,
     filename: str,
-    _user: str = Depends(get_current_user),
+    _user: str = Depends(get_download_user),
 ):
     """Download a single file from a job."""
     d = _job_dir(job_id)
@@ -78,7 +78,7 @@ async def download_file(
 @router.get("/{job_id}/zip")
 async def download_zip(
     job_id: str,
-    _user: str = Depends(get_current_user),
+    _user: str = Depends(get_download_user),
 ):
     """Download all files for a job as a single zip archive."""
     d = _job_dir(job_id)

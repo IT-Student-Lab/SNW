@@ -71,6 +71,10 @@ export default function ResultsPage() {
   // PPTX export
   const [pptxLoading, setPptxLoading] = useState(false);
 
+  // Download loading states
+  const [zipLoading, setZipLoading] = useState(false);
+  const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (!jobId) return;
     api
@@ -103,30 +107,51 @@ export default function ResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  /** Download via axios (includes JWT) then trigger browser save */
+  /** Get a short-lived download token for authenticated downloads */
+  const getDownloadToken = async (): Promise<string> => {
+    const res = await api.post("/api/auth/download-token");
+    return res.data.token;
+  };
+
+  /**
+   * Base URL that hits the backend directly (bypassing Vite proxy).
+   * Native browser downloads need real Content-Disposition headers which
+   * the Vite dev proxy can strip/buffer. In production the proxy (nginx)
+   * works fine, so we keep the same origin.
+   */
+  const downloadBase = import.meta.env.DEV
+    ? "http://localhost:8009"
+    : (import.meta.env.VITE_API_URL ?? "");
+
+  /** For inline image loading we still go through Vite proxy */
+  const apiBase = import.meta.env.VITE_API_URL ?? "";
+
   const downloadFile = async (filename: string) => {
-    const res = await api.get(
-      `/api/files/${jobId}/download/${filename}`,
-      { responseType: "blob" }
-    );
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    setDownloadingFiles((prev) => new Set(prev).add(filename));
+    try {
+      const token = await getDownloadToken();
+      window.location.href =
+        `${downloadBase}/api/files/${jobId}/download/${filename}?token=${encodeURIComponent(token)}`;
+    } finally {
+      setTimeout(() => {
+        setDownloadingFiles((prev) => {
+          const next = new Set(prev);
+          next.delete(filename);
+          return next;
+        });
+      }, 1500);
+    }
   };
 
   const downloadZip = async () => {
-    const res = await api.get(`/api/files/${jobId}/zip`, {
-      responseType: "blob",
-    });
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${jobId}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setZipLoading(true);
+    try {
+      const token = await getDownloadToken();
+      window.location.href =
+        `${downloadBase}/api/files/${jobId}/zip?token=${encodeURIComponent(token)}`;
+    } finally {
+      setTimeout(() => setZipLoading(false), 2000);
+    }
   };
 
   const runQuickscan = async () => {
@@ -156,21 +181,13 @@ export default function ResultsPage() {
   const exportPptx = async () => {
     setPptxLoading(true);
     try {
-      const res = await api.post(
-        `/api/quickscan/${jobId}/export`,
-        { sections: qsSections },
-        { responseType: "blob" }
-      );
-      const url = URL.createObjectURL(res.data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `quickscan_${jobId}.pptx`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const token = await getDownloadToken();
+      window.location.href =
+        `${downloadBase}/api/quickscan/${jobId}/export?token=${encodeURIComponent(token)}`;
     } catch {
       alert("PPTX export mislukt.");
     } finally {
-      setPptxLoading(false);
+      setTimeout(() => setPptxLoading(false), 2000);
     }
   };
 
@@ -180,11 +197,13 @@ export default function ResultsPage() {
   const loadImage = async (filename: string) => {
     if (imageUrls[filename]) return;
     try {
-      const res = await api.get(
-        `/api/files/${jobId}/download/${filename}`,
-        { responseType: "blob" }
+      const token = await getDownloadToken();
+      const res = await fetch(
+        `${apiBase}/api/files/${jobId}/download/${filename}?token=${encodeURIComponent(token)}`
       );
-      const url = URL.createObjectURL(res.data);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       setImageUrls((prev) => ({ ...prev, [filename]: url }));
     } catch {
       // silently skip broken images
@@ -306,8 +325,16 @@ export default function ResultsPage() {
           <>
             {/* Primary download buttons */}
             <div className="primary-downloads">
-              <button className="btn btn-primary" onClick={downloadZip}>
-                Download onderlegger (ZIP)
+              <button
+                className="btn btn-primary"
+                onClick={downloadZip}
+                disabled={zipLoading}
+              >
+                {zipLoading ? (
+                  <><span className="spinner spinner-inline" /> Downloaden…</>
+                ) : (
+                  "Download onderlegger (ZIP)"
+                )}
               </button>
             </div>
             <p className="download-hint">
@@ -326,8 +353,13 @@ export default function ResultsPage() {
                     <button
                       className="btn btn-outline btn-sm"
                       onClick={() => downloadFile(f.filename)}
+                      disabled={downloadingFiles.has(f.filename)}
                     >
-                      Download
+                      {downloadingFiles.has(f.filename) ? (
+                        <><span className="spinner spinner-inline" /> Bezig…</>
+                      ) : (
+                        "Download"
+                      )}
                     </button>
                   </li>
                 ))}
@@ -363,7 +395,11 @@ export default function ResultsPage() {
               disabled={pptxLoading}
               style={{ marginBottom: "var(--space-md)" }}
             >
-              {pptxLoading ? "Exporteren…" : "Exporteer als PowerPoint (.pptx)"}
+              {pptxLoading ? (
+                <><span className="spinner spinner-inline" /> Exporteren…</>
+              ) : (
+                "Exporteer als PowerPoint (.pptx)"
+              )}
             </button>
 
             {qsSections.map((s, i) =>

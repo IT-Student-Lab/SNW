@@ -9,7 +9,7 @@ RUN npm run build
 ## ===== Stage 2: Python backend =====
 FROM python:3.12-slim
 
-# System dependencies for Pillow, GDAL-light, fonts
+# System dependencies for Pillow, GDAL-light, fonts, and Xvfb (for ODA File Converter)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         gcc \
@@ -18,10 +18,14 @@ RUN apt-get update && \
         libgeos-dev \
         libproj-dev \
         fonts-dejavu-core \
+        xvfb \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Force matplotlib to use non-interactive backend (no X11/DISPLAY needed)
+ENV MPLBACKEND=Agg
 
 # Install Python dependencies
 COPY requirements.txt .

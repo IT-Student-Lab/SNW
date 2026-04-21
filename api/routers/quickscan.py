@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 
 import requests as http_requests
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from api.deps import get_current_user
+from api.deps import get_current_user, get_download_user
 from app.config import settings
 from app.core import address_to_rd_full, bbox_around_point
 from app.core.quickscan import run_quickscan
@@ -403,21 +403,19 @@ async def quickscan_cached(
     return {"sections": sections}
 
 
-@router.post("/quickscan/{job_id}/export")
+@router.get("/quickscan/{job_id}/export")
 async def quickscan_export_pptx(
     job_id: str,
-    body: dict | None = Body(None),
     address: str | None = Query(None),
     x: float | None = Query(None),
     y: float | None = Query(None),
     radius: float = Query(250),
-    _user: str = Depends(get_current_user),
+    _user: str = Depends(get_download_user),
 ):
     """Export quickscan results as a PowerPoint (.pptx) file.
 
-    If sections are included in the request body, use those directly
-    (fast path — no AI re-run). Otherwise fall back to running the
-    full quickscan.
+    Uses cached quickscan.json from disk, or falls back to running
+    the full quickscan.
     """
     if "/" in job_id or "\\" in job_id or ".." in job_id:
         raise HTTPException(400, "Ongeldige job id")
@@ -425,20 +423,17 @@ async def quickscan_export_pptx(
     if not out_dir.is_dir():
         raise HTTPException(404, "Job niet gevonden")
 
-    if body and "sections" in body and body["sections"]:
-        sections = body["sections"]
+    # Try loading cached results from disk first
+    cache_file = out_dir / "quickscan.json"
+    if cache_file.exists():
+        sections = json.loads(cache_file.read_text(encoding="utf-8"))
     else:
-        # Try loading cached results from disk first
-        cache_file = out_dir / "quickscan.json"
-        if cache_file.exists():
-            sections = json.loads(cache_file.read_text(encoding="utf-8"))
-        else:
-            try:
-                sections, out_dir = _build_quickscan_data(job_id, address, x, y, radius)
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(500, f"Quickscan mislukt: {e}")
+        try:
+            sections, out_dir = _build_quickscan_data(job_id, address, x, y, radius)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"Quickscan mislukt: {e}")
 
     buf = _sections_to_pptx(sections, out_dir)
 
