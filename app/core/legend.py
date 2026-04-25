@@ -44,22 +44,22 @@ def build_pretty_legend(
     show_percent: bool = True,
 ) -> Image.Image:
     try:
-        font_title = ImageFont.truetype("arial.ttf", 28)
-        font_sub = ImageFont.truetype("arial.ttf", 18)
-        font_row = ImageFont.truetype("arial.ttf", 20)
-        font_pct = ImageFont.truetype("arial.ttf", 18)
+        font_title = ImageFont.truetype("arial.ttf", 42)
+        font_sub = ImageFont.truetype("arial.ttf", 26)
+        font_row = ImageFont.truetype("arial.ttf", 28)
+        font_pct = ImageFont.truetype("arial.ttf", 26)
     except Exception:
         font_title = ImageFont.load_default()
         font_sub = ImageFont.load_default()
         font_row = ImageFont.load_default()
         font_pct = ImageFont.load_default()
 
-    pad = 22
-    top_pad = 18
-    swatch = 26
-    row_gap = 10
-    line_gap = 4
-    pct_w = 88 if show_percent else 0
+    pad = 28
+    top_pad = 22
+    swatch = 32
+    row_gap = 14
+    line_gap = 5
+    pct_w = 100 if show_percent else 0
     label_max_w = width - 2 * pad - swatch - 16 - pct_w - 10
 
     tmp = Image.new("RGBA", (width, 2000), (255, 255, 255, 0))
@@ -199,7 +199,7 @@ def extract_rows_from_vertical_legend(
     d = ImageDraw.Draw(card)
 
     try:
-        font_title = ImageFont.truetype("arial.ttf", 24)
+        font_title = ImageFont.truetype("arial.ttf", 32)
     except Exception:
         font_title = ImageFont.load_default()
 
@@ -307,13 +307,13 @@ def build_ahn_dynamic_legend(
     vmin: float,
     vmax: float,
     *,
-    width: int = 920,
-    bar_height: int = 28,
+    width: int = 1200,
+    bar_height: int = 36,
 ) -> Image.Image:
     """Build a gradient-bar legend card for AHN showing the local value range."""
     try:
-        font_title = ImageFont.truetype("arial.ttf", 24)
-        font_label = ImageFont.truetype("arial.ttf", 18)
+        font_title = ImageFont.truetype("arial.ttf", 32)
+        font_label = ImageFont.truetype("arial.ttf", 24)
     except Exception:
         font_title = ImageFont.load_default()
         font_label = ImageFont.load_default()

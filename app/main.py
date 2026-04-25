@@ -357,7 +357,7 @@ def _analyse_images(
     section_prompt: str,
     location_context: str,
 ) -> str:
-    """Send images to GPT-4o for analysis. Returns markdown text."""
+    """Send images to GPT-5o for analysis. Returns markdown text."""
     api_key = settings.openai_api_key
     if not api_key:
         return "*Geen OPENAI_API_KEY geconfigureerd — analyse overgeslagen.*"

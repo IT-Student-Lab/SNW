@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api";
 import "./ResultsPage.css";
@@ -18,6 +18,7 @@ interface WikiImage {
   title: string;
   thumb_url: string;
   description_url: string;
+  local_file?: string;
 }
 
 interface LocationInfo {
@@ -45,6 +46,76 @@ type QuickscanSection = LocationInfo | AnalysisSection;
 
 function isLocationInfo(s: QuickscanSection): s is LocationInfo {
   return s.title === "_location_info";
+}
+
+/**
+ * Parse a single line of markdown-ish text into React nodes.
+ * Handles: [text](url), bare https:// URLs, **bold**, and ![alt](src) images.
+ */
+const MD_TOKEN =
+  /(\!\[[^\]]*\]\(https?:\/\/[^)]+\)|\[[^\]]*\]\(https?:\/\/[^)]+\)|\*\*[^*]+\*\*|https?:\/\/[^\s)\]>"]+)/g;
+
+function MarkdownLine({ text }: { text: string }): ReactNode {
+  const parts = text.split(MD_TOKEN);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!part) return null;
+        // Markdown image: ![alt](src)
+        const imgMatch = part.match(/^\!\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/);
+        if (imgMatch) {
+          return (
+            <img
+              key={i}
+              src={imgMatch[2]}
+              alt={imgMatch[1]}
+              style={{ maxWidth: "100%", marginTop: 8, marginBottom: 8, borderRadius: 4 }}
+            />
+          );
+        }
+        // Markdown link: [text](url)
+        const linkMatch = part.match(/^\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/);
+        if (linkMatch) {
+          return (
+            <a key={i} href={linkMatch[2]} target="_blank" rel="noreferrer">
+              {linkMatch[1]}
+            </a>
+          );
+        }
+        // Bold: **text**
+        const boldMatch = part.match(/^\*\*(.+)\*\*$/);
+        if (boldMatch) {
+          return <strong key={i}>{boldMatch[1]}</strong>;
+        }
+        // Bare URL
+        if (/^https?:\/\//.test(part)) {
+          return (
+            <a key={i} href={part} target="_blank" rel="noreferrer">
+              {part}
+            </a>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/** Render multi-line markdown-ish text with clickable links, bold, and images. */
+function RichText({ text }: { text: string }) {
+  // Strip markdown heading prefixes (## etc.)
+  const lines = text.split("\n").map((l) => l.replace(/^#{1,4}\s+/, ""));
+  return (
+    <div className="qs-analysis">
+      {lines.map((line, i) =>
+        line.trim() === "" ? null : (
+          <p key={i}>
+            <MarkdownLine text={line} />
+          </p>
+        )
+      )}
+    </div>
+  );
 }
 
 export default function ResultsPage() {
@@ -263,7 +334,7 @@ export default function ResultsPage() {
 
       {/* AI analysis text */}
       {s.analysis && (
-        <div className="qs-analysis">{s.analysis}</div>
+        <RichText text={s.analysis} />
       )}
 
       {/* Kadaster parcel info */}
@@ -278,7 +349,7 @@ export default function ResultsPage() {
       {s.omgevingsvisie && (
         <div className="qs-omgevingsvisie">
           <h4>Omgevingsvisie</h4>
-          <div className="qs-analysis">{s.omgevingsvisie}</div>
+          <RichText text={s.omgevingsvisie} />
         </div>
       )}
 
@@ -286,7 +357,7 @@ export default function ResultsPage() {
       {s.history_web && (
         <div className="qs-history-web">
           <h4>Historische informatie</h4>
-          <div className="qs-analysis">{s.history_web}</div>
+          <RichText text={s.history_web} />
         </div>
       )}
 

@@ -164,6 +164,11 @@ def build_all_outputs(
     kad = download_kadastrale_kaart(bbox, px=px, session=session)
     lucht = Image.open(out_dir / fn_luchtfoto).convert("RGBA")
     lucht_plus = Image.alpha_composite(lucht, kad)
+
+    # Mark the center address point on the kadaster overlay
+    from app.core.downloads import _draw_address_dot
+    cx_tmp, cy_tmp = bbox_center(bbox)
+    _draw_address_dot(lucht_plus, bbox, (cx_tmp, cy_tmp), radius_px=10)
     lucht_plus.save(out_dir / fn_luchtfoto_kad)
 
     _progress("Bestemmingsplan kaarten ophalen…")
@@ -191,7 +196,7 @@ def build_all_outputs(
 
     _progress("Geomorfologische kaart ophalen…")
     download_gmk_with_dominant_legend(
-        bbox_thematic, out_dir / fn_gmk, px=px, session=session
+        bbox, out_dir / fn_gmk, px=px, session=session
     )
     if _is_image_empty(out_dir / fn_gmk):
         _save_no_data_placeholder(
@@ -218,7 +223,7 @@ def build_all_outputs(
 
     _progress("Grondwaterstanden ophalen…")
     download_wdm(
-        bbox_thematic,
+        bbox,
         out_dir / fn_wdm_ghg,
         layer="bro-grondwaterspiegeldieptemetingen-GHG",
         px=px,
@@ -229,7 +234,7 @@ def build_all_outputs(
             out_dir / fn_wdm_ghg, "Grondwaterstand (GHG)", px=px,
         )
     download_wdm(
-        bbox_thematic,
+        bbox,
         out_dir / fn_wdm_glg,
         layer="bro-grondwaterspiegeldieptemetingen-GLG",
         px=px,
@@ -240,7 +245,7 @@ def build_all_outputs(
             out_dir / fn_wdm_glg, "Grondwaterstand (GLG)", px=px,
         )
     download_wdm(
-        bbox_thematic,
+        bbox,
         out_dir / fn_wdm_gt,
         layer="bro-grondwaterspiegeldieptemetingen-GT",
         px=px,
@@ -253,7 +258,7 @@ def build_all_outputs(
 
     _progress("Bodemkaart ophalen…")
     download_bodemvlakken_with_dominant_legend(
-        bbox_thematic, out_dir / fn_bodemvlakken, px=px, session=session
+        bbox, out_dir / fn_bodemvlakken, px=px, session=session
     )
     if _is_image_empty(out_dir / fn_bodemvlakken):
         _save_no_data_placeholder(
@@ -292,7 +297,7 @@ def build_all_outputs(
     try:
         download_topotijdreis(
             bbox, out_dir,
-            years=[1900, 1950, 2000],
+            years=[1900, 1950, 2000, 2020],
             center=(cx, cy),
             breed_radius=1000.0,
             session=session,
@@ -304,15 +309,15 @@ def build_all_outputs(
         ExportPlan(fn_topo, bbox_topo_for_dxf, "01-00-00-TOPOKAART", default_on=False),
         ExportPlan(fn_luchtfoto_kad, bbox, "01-00-00-LUCHTFOTO_KADASTER", default_on=False),
         ExportPlan(fn_luchtfoto, bbox, "01-00-00-LUCHTFOTO_PDOK", default_on=True),
-        ExportPlan(fn_wdm_ghg, bbox_thematic, "01-00-00-GRONDWATERSTAND_GHG", default_on=False),
-        ExportPlan(fn_wdm_glg, bbox_thematic, "01-00-00-GRONDWATERSTAND_GLG", default_on=False),
-        ExportPlan(fn_wdm_gt, bbox_thematic, "01-00-00-GRONDWATERTRAP_GT", default_on=False),
-        ExportPlan(fn_gmk, bbox_thematic, "01-00-00-GEOMORFOLOGISCHE_KAART", default_on=False),
+        ExportPlan(fn_wdm_ghg, bbox, "01-00-00-GRONDWATERSTAND_GHG", default_on=False),
+        ExportPlan(fn_wdm_glg, bbox, "01-00-00-GRONDWATERSTAND_GLG", default_on=False),
+        ExportPlan(fn_wdm_gt, bbox, "01-00-00-GRONDWATERTRAP_GT", default_on=False),
+        ExportPlan(fn_gmk, bbox, "01-00-00-GEOMORFOLOGISCHE_KAART", default_on=False),
         ExportPlan(fn_best_enkel, bbox, "01-00-00-BESTEMMINGSPLAN_ENKEL", default_on=False),
         ExportPlan(fn_best_dubbel, bbox, "01-00-00-BESTEMMINGSPLAN_DUBBEL", default_on=False),
         ExportPlan(fn_ahn_dsm, bbox, "01-00-00-HOOGTEKAART_AHN_DSM", default_on=False),
         ExportPlan(fn_ahn_dtm, bbox, "01-00-00-HOOGTEKAART_AHN_DTM", default_on=False),
-        ExportPlan(fn_bodemvlakken, bbox_thematic, "01-00-00-BODEMVLAKKEN", default_on=False),
+        ExportPlan(fn_bodemvlakken, bbox, "01-00-00-BODEMVLAKKEN", default_on=False),
         ExportPlan(fn_natura2000, bbox_natura2000, "01-00-00-NATURA2000", default_on=False),
     ]
 

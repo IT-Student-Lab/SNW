@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.core.bodem import bodem_label_at_pixel
 from app.core.constants import (
@@ -46,6 +46,103 @@ from app.core.wms import (
 )
 
 logger = get_logger(__name__)
+
+
+# --------------- Plangebied overlay helper ---------------
+
+def _draw_plangebied_rect(
+    img: Image.Image,
+    bbox_img: BBox,
+    bbox_plan: BBox,
+    color: str = "red",
+    width: int = 5,
+    label: str = "Plangebied",
+) -> Image.Image:
+    """Draw a rectangle on img showing where bbox_plan falls within bbox_img.
+
+    Returns the modified image with a red rectangle and label.
+    """
+    draw = ImageDraw.Draw(img)
+    W, H = img.size
+    xmin_i, ymin_i, xmax_i, ymax_i = bbox_img
+    xmin_p, ymin_p, xmax_p, ymax_p = bbox_plan
+
+    # Convert plan bbox coords to pixel coords
+    span_x = xmax_i - xmin_i
+    span_y = ymax_i - ymin_i
+    if span_x <= 0 or span_y <= 0:
+        return img
+
+    px_left = (xmin_p - xmin_i) / span_x * W
+    px_right = (xmax_p - xmin_i) / span_x * W
+    px_top = (ymax_i - ymax_p) / span_y * H
+    px_bottom = (ymax_i - ymin_p) / span_y * H
+
+    # Draw rectangle
+    draw.rectangle(
+        [px_left, px_top, px_right, px_bottom],
+        outline=color, width=width,
+    )
+
+    # Add label above the rectangle
+    try:
+        font = ImageFont.truetype("arial.ttf", max(16, int(H * 0.018)))
+    except OSError:
+        font = ImageFont.load_default(size=max(16, int(H * 0.018)))
+
+    label_bbox = draw.textbbox((0, 0), label, font=font)
+    label_w = label_bbox[2] - label_bbox[0]
+    label_h = label_bbox[3] - label_bbox[1]
+    label_x = px_left + (px_right - px_left - label_w) / 2
+    label_y = px_top - label_h - 6
+    if label_y < 2:
+        label_y = px_bottom + 4
+
+    # Draw text background
+    draw.rectangle(
+        [label_x - 3, label_y - 2, label_x + label_w + 3, label_y + label_h + 2],
+        fill="white",
+    )
+    draw.text((label_x, label_y), label, fill=color, font=font)
+
+    return img
+
+
+def _draw_address_dot(
+    img: Image.Image,
+    bbox_img: BBox,
+    center: tuple[float, float],
+    radius_px: int = 12,
+    color: str = "red",
+    outline_color: str = "white",
+) -> Image.Image:
+    """Draw a small filled dot with white outline at the address point."""
+    draw = ImageDraw.Draw(img)
+    W, H = img.size
+    xmin, ymin, xmax, ymax = bbox_img
+    span_x = xmax - xmin
+    span_y = ymax - ymin
+    if span_x <= 0 or span_y <= 0:
+        return img
+
+    cx, cy = center
+    px_x = (cx - xmin) / span_x * W
+    px_y = (ymax - cy) / span_y * H
+
+    # White outline circle
+    draw.ellipse(
+        [px_x - radius_px - 2, px_y - radius_px - 2,
+         px_x + radius_px + 2, px_y + radius_px + 2],
+        fill=outline_color,
+    )
+    # Filled color dot
+    draw.ellipse(
+        [px_x - radius_px, px_y - radius_px,
+         px_x + radius_px, px_y + radius_px],
+        fill=color,
+    )
+
+    return img
 
 
 # --------------- Kadaster BRK data ---------------
@@ -326,7 +423,7 @@ def download_gmk_with_dominant_legend(
         rows,
         title="Geomorfologie",
         subtitle="Dominante klassen binnen het geselecteerde gebied",
-        width=920,
+        width=1400,
         show_percent=True,
     )
 
@@ -334,8 +431,8 @@ def download_gmk_with_dominant_legend(
         base,
         legend,
         position="bottom-right",
-        legend_scale=1.0,
-        legend_max_width_ratio=0.48,
+        legend_scale=1.5,
+        legend_max_width_ratio=0.58,
         add_white_box=False,
     )
     out.save(out_path)
@@ -416,16 +513,16 @@ def download_ahn(
                 legend = extract_rows_from_vertical_legend(
                     raw_legend,
                     title=f"AHN {product.upper()}",
-                    max_width=1100,
-                    max_height=900,
-                    scale=1.65,
+                    max_width=1500,
+                    max_height=1200,
+                    scale=2.4,
                 )
             img = place_legend_on_image(
                 img,
                 legend,
                 position="bottom-right",
-                legend_scale=1.0,
-                legend_max_width_ratio=0.58,
+                legend_scale=1.2,
+                legend_max_width_ratio=0.62,
                 add_white_box=False,
             )
         except Exception as e:
@@ -479,7 +576,7 @@ def download_bodemvlakken_with_dominant_legend(
         rows,
         title="Bodemvlakken",
         subtitle="Dominante klassen binnen het geselecteerde gebied",
-        width=920,
+        width=1400,
         show_percent=True,
     )
 
@@ -487,8 +584,8 @@ def download_bodemvlakken_with_dominant_legend(
         base,
         legend,
         position="bottom-right",
-        legend_scale=1.0,
-        legend_max_width_ratio=0.48,
+        legend_scale=1.5,
+        legend_max_width_ratio=0.58,
         add_white_box=False,
     )
     out.save(out_path)
@@ -527,16 +624,16 @@ def download_wdm(
             legend = extract_rows_from_vertical_legend(
                 raw_legend,
                 title=nice_title,
-                max_width=1100,
-                max_height=900,
-                scale=1.65,
+                max_width=1500,
+                max_height=1200,
+                scale=2.4,
             )
             img = place_legend_on_image(
                 img,
                 legend,
                 position="bottom-right",
-                legend_scale=1.0,
-                legend_max_width_ratio=0.58,
+                legend_scale=1.2,
+                legend_max_width_ratio=0.62,
                 add_white_box=False,
             )
         except Exception as e:
@@ -570,8 +667,8 @@ def build_plu_outputs(
         base=plu_plus_percelen,
         legend=legend_img,
         position="bottom-right",
-        legend_scale=2.0,
-        legend_max_width_ratio=0.2,
+        legend_scale=2.8,
+        legend_max_width_ratio=0.25,
     )
     bestemming_kadaster.save(out_bestemming_percelen)
 
@@ -580,8 +677,8 @@ def build_plu_outputs(
         base=enkel_plus_dubbel,
         legend=legend_img,
         position="bottom-right",
-        legend_scale=2.0,
-        legend_max_width_ratio=0.2,
+        legend_scale=2.8,
+        legend_max_width_ratio=0.25,
     )
     bestemmingdubbel.save(out_bestemming_dubbel)
 
@@ -625,21 +722,9 @@ def download_natura2000(
 
     result = Image.alpha_composite(bg, overlay)
 
-    # Draw a crosshair at the project location
-    from PIL import ImageDraw
-    draw = ImageDraw.Draw(result)
-    # Convert center RD coords to pixel coords in the wide bbox
-    xmin_w, ymin_w, xmax_w, ymax_w = bbox_wide
-    px_x = (center[0] - xmin_w) / (xmax_w - xmin_w) * px
-    px_y = (ymax_w - center[1]) / (ymax_w - ymin_w) * px
-    r = 18
-    lw = 4
-    draw.ellipse(
-        [px_x - r, px_y - r, px_x + r, px_y + r],
-        outline="red", width=lw,
-    )
-    draw.line([px_x - r * 1.6, px_y, px_x + r * 1.6, px_y], fill="red", width=lw)
-    draw.line([px_x, px_y - r * 1.6, px_x, px_y + r * 1.6], fill="red", width=lw)
+    # Draw a visible plangebied rectangle and address dot
+    _draw_plangebied_rect(result, bbox_wide, bbox, color="red", width=5, label="Plangebied")
+    _draw_address_dot(result, bbox_wide, center, radius_px=10)
 
     result.save(out_path)
 
@@ -667,6 +752,9 @@ def download_ligging_breed(
         {**wms_base_params(req), "LAYERS": "top25raster", "STYLES": ""},
         session=session,
     )
+    topo = topo.convert("RGBA")
+    _draw_plangebied_rect(topo, bbox_breed, bbox, color="red", width=5, label="Plangebied")
+    _draw_address_dot(topo, bbox_breed, center, radius_px=10)
     topo.save(out_path_topo)
 
     lucht = wms_get_image(
@@ -674,6 +762,9 @@ def download_ligging_breed(
         {**wms_base_params(req), "LAYERS": "Actueel_orthoHR", "STYLES": ""},
         session=session,
     )
+    lucht = lucht.convert("RGBA")
+    _draw_plangebied_rect(lucht, bbox_breed, bbox, color="red", width=5, label="Plangebied")
+    _draw_address_dot(lucht, bbox_breed, center, radius_px=10)
     lucht.save(out_path_lucht)
 
 

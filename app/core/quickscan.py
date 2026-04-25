@@ -8,6 +8,7 @@ and the new FastAPI backend can reuse the same analysis functions.
 from __future__ import annotations
 
 import base64
+import re
 from pathlib import Path
 
 import requests
@@ -24,12 +25,15 @@ SLIDE_SECTIONS: list[dict] = [
         "captions": ["Topokaart (uitgezoomd)", "Luchtfoto (uitgezoomd)"],
         "prompt": (
             "Je ziet een uitgezoomde topokaart en/of luchtfoto van een projectlocatie in Nederland. "
-            "Beschrijf de ligging: in welk soort omgeving ligt het (stedelijk, dorps, "
-            "landelijk, bos, polder, kust)? Welke opvallende elementen zie je in de "
-            "wijdere omgeving (wegen, water, bebouwing, groen, industriegebieden)? "
-            "Noem relevante infrastructuur en landschappelijke kenmerken. "
+            "Het plangebied is aangegeven met een rood kader op de kaart. "
+            "Beschrijf ALLEEN feitelijk wat je ziet op de kaart — interpreteer niet en speculeer niet. "
+            "Benoem de ligging: stedelijk, dorps, landelijk, bos, polder of kust. "
+            "Noem SPECIFIEK de namen van zichtbare waterlopen (bijv. welke rivier, kanaal, sloot), "
+            "bossen (bijv. naam van het bos), wegen (bijv. A28, N-weg), en nabijgelegen dorpen of steden. "
+            "Beschrijf welk type groen (weiland, akkerland, boomgaard, loofbos, naaldbos) zichtbaar is. "
+            "Benoem de afstand en richting tot herkenbare referentiepunten. "
             "Vermeld de bron: PDOK TOPraster / Luchtfoto (actueel jaar). "
-            "Geef een korte analyse van 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 4-6 zinnen."
         ),
     },
     {
@@ -38,10 +42,13 @@ SLIDE_SECTIONS: list[dict] = [
         "captions": ["Luchtfoto met kadastrale kaart"],
         "prompt": (
             "Je ziet een luchtfoto met daarop de kadastrale percelen. "
-            "Beschrijf wat je ziet: hoe groot zijn de percelen globaal, "
-            "hoe is de verkaveling, zijn er opvallende perceelvormen? "
+            "Beschrijf ALLEEN feitelijk wat je ziet — interpreteer niet. "
+            "Beschrijf de grootte van de percelen, de verkavelingsvorm "
+            "(regelmatig/onregelmatig, strokenverkaveling, blokverkaveling), "
+            "en of er opvallende perceelvormen zichtbaar zijn. "
+            "Benoem wat er op de percelen zichtbaar is (bebouwing, gras, akker, etc.). "
             "Bron: Kadaster BRK / PDOK (actueel). "
-            "Geef een korte analyse van 2-4 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -50,12 +57,13 @@ SLIDE_SECTIONS: list[dict] = [
         "captions": ["Enkelbestemming", "Dubbelbestemming"],
         "prompt": (
             "Je ziet bestemmingsplankaarten (enkelbestemming en/of dubbelbestemming). "
-            "Analyseer welke bestemmingen je herkent aan de kleuren en patronen "
-            "(wonen, agrarisch, groen, natuur, verkeer, water, etc.). "
-            "Welke bestemming is dominant? Zijn er dubbelbestemmingen die beperkingen "
-            "opleveren voor planontwikkeling? "
-            "Vermeld dat de bron het bestemmingsplan is via Ruimtelijkeplannen.nl / PDOK PLU (actueel). "
-            "Geef een analyse van 3-5 zinnen."
+            "Beschrijf ALLEEN feitelijk wat je ziet aan kleuren en patronen — interpreteer niet. "
+            "Benoem welke bestemmingen zichtbaar zijn op basis van de legenda "
+            "(wonen, agrarisch, groen, natuur, verkeer, water, etc.) en welke dominant is. "
+            "Beschrijf feitelijk welke dubbelbestemmingen zichtbaar zijn en waar deze liggen "
+            "ten opzichte van het plangebied. "
+            "Vermeld de bron: bestemmingsplan via Ruimtelijkeplannen.nl / PDOK PLU (actueel). "
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -63,15 +71,17 @@ SLIDE_SECTIONS: list[dict] = [
         "files": ["natura2000.png"],
         "captions": ["Natura 2000-gebieden"],
         "prompt": (
-            "Je ziet een kaart met Natura 2000-gebieden over een luchtfoto. "
+            "Je ziet een kaart met Natura 2000-gebieden over een topokaart. "
+            "Het plangebied is aangegeven met een rood kader op de kaart. "
             "Gekleurde/gearceerde vlakken duiden op beschermde Natura 2000-gebieden. "
-            "Beoordeel of de projectlocatie binnen of nabij een beschermd gebied valt. "
-            "Beschrijf de mogelijke gevolgen: noodzaak voor een voortoets of passende beoordeling, "
-            "beperkingen voor stikstofdepositie, verstoring van soorten, of bufferzone-eisen. "
-            "Als er geen gekleurd vlak zichtbaar is, meld dan dat het gebied niet binnen "
-            "Natura 2000 valt maar benoem wel de afstand tot het dichtstbijzijnde gebied indien zichtbaar. "
+            "Beschrijf ALLEEN feitelijk wat je ziet — interpreteer niet en speculeer niet. "
+            "Benoem of er gekleurde Natura 2000-vlakken zichtbaar zijn, en zo ja, "
+            "in welke richting en op welke geschatte afstand deze liggen ten opzichte "
+            "van het plangebied (het rode kader). Noem de NAAM van het Natura 2000-gebied "
+            "als deze op de kaart staat of als je het herkent aan de locatie. "
+            "Als er geen gekleurd vlak zichtbaar is, vermeld dat feitelijk. "
             "Bron: Rijksdienst voor Ondernemend Nederland (RVO), Natura 2000-register (actueel). "
-            "Geef een analyse van 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -80,12 +90,14 @@ SLIDE_SECTIONS: list[dict] = [
         "captions": ["Geomorfologische kaart"],
         "prompt": (
             "Je ziet een geomorfologische kaart met legenda. "
-            "Beschrijf welke landvormen aanwezig zijn (strandwal, strandvlakte, "
-            "dekzandrug, rivierterras, kustduin, etc.). "
-            "Leg per landvorm kort uit wat het is en wat de betekenis is "
-            "voor bouwplannen of grondwerk. "
+            "Beschrijf ALLEEN feitelijk welke landvormen de legenda aangeeft "
+            "(strandwal, strandvlakte, dekzandrug, rivierterras, kustduin, "
+            "beekdal, veenvlakte, etc.). "
+            "Benoem per zichtbare landvorm kort wat het is (feitelijke definitie). "
+            "Beschrijf de ruimtelijke verdeling: welke landvorm is dominant, "
+            "zijn er overgangen zichtbaar? "
             "Bron: BRO Geomorfologische kaart (2024). "
-            "Geef een analyse van 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -94,11 +106,12 @@ SLIDE_SECTIONS: list[dict] = [
         "captions": ["Bodemkaart"],
         "prompt": (
             "Je ziet een bodemkaart met legenda. "
-            "Beschrijf welke bodemtypen aanwezig zijn op de locatie. "
-            "Geef per type een korte uitleg (bijv. draagkracht, waterdoorlatendheid, "
-            "geschiktheid voor bebouwing/beplanting). "
+            "Beschrijf ALLEEN feitelijk welke bodemtypen de legenda aangeeft "
+            "op de locatie (bijv. podzolgrond, eerdgrond, kleigrond, veengrond, etc.). "
+            "Geef per bodemtype een feitelijke omschrijving: samenstelling, "
+            "draagkracht, waterdoorlatendheid, en geschiktheid voor beplanting. "
             "Bron: BRO Bodemkaart (2024). "
-            "Analyse in 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -112,11 +125,11 @@ SLIDE_SECTIONS: list[dict] = [
         "prompt": (
             "Je ziet kaarten van de grondwaterstand: GHG (gemiddeld hoogste), "
             "GLG (gemiddeld laagste) en eventueel grondwatertrap. "
-            "Beschrijf op welke diepte het grondwater zich bevindt, "
-            "wat de grondwatertrap betekent, en welke gevolgen dit heeft "
-            "voor bouw, drainage en tuinaanleg. "
+            "Beschrijf ALLEEN feitelijk wat de legenda aangeeft — interpreteer niet. "
+            "Benoem op welke diepte het grondwater zich bevindt volgens de kaart "
+            "en welke grondwatertrap van toepassing is. "
             "Bron: BRO Grondwaterspiegeldiepte (2024). "
-            "Analyse in 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -129,11 +142,12 @@ SLIDE_SECTIONS: list[dict] = [
         "prompt": (
             "Je ziet AHN hoogtekaarten: een DTM (maaiveld) en/of DSM "
             "(inclusief gebouwen/bomen). De kleurschaal is dynamisch. "
-            "Beschrijf de hoogteverschillen die je ziet, wat het globale "
-            "hoogtebereik is (lees af uit de legenda), of het terrein vlak "
-            "of heuvelachtig is, en welke objecten (gebouwen, bomen) opvallen. "
+            "Beschrijf ALLEEN feitelijk wat je ziet — interpreteer niet. "
+            "Lees het hoogtebereik af uit de legenda en vermeld de waarden. "
+            "Beschrijf of het terrein vlak of hellend is en in welke richting. "
+            "Benoem zichtbare hoogteverschillen (waterlopen, dijken, gebouwen, bomenrijen). "
             "Bron: AHN4, Rijkswaterstaat (2020-2022). "
-            "Geef een analyse van 3-5 zinnen."
+            "Geef een feitelijke beschrijving van 3-5 zinnen."
         ),
     },
     {
@@ -142,20 +156,25 @@ SLIDE_SECTIONS: list[dict] = [
             "topotijdreis_1900.png",
             "topotijdreis_1950.png",
             "topotijdreis_2000.png",
+            "topotijdreis_2020.png",
         ],
         "captions": [
             "Topokaart 1900 (Topotijdreis)",
             "Topokaart 1950 (Topotijdreis)",
             "Topokaart 2000 (Topotijdreis)",
+            "Topokaart 2020 (Topotijdreis)",
         ],
         "prompt": (
-            "Je ziet historische topokaarten (Topotijdreis, Kadaster) uit 1900, 1950 en 2000. "
-            "Beschrijf hoe het gebied zich in de afgelopen 100+ jaar heeft ontwikkeld: "
-            "wat was er rond 1900 (agrarisch, onbebouwd, dorp, stad)? "
-            "Welke veranderingen zijn zichtbaar rond 1950 (naoorlogse uitbreiding, ruilverkaveling)? "
-            "En hoe is het gebied sindsdien getransformeerd tot de huidige situatie? "
+            "Je ziet historische topokaarten (Topotijdreis, Kadaster) uit 1900, 1950, 2000 en 2020. "
+            "Het plangebied is aangegeven met een rood kader op elke kaart. "
+            "Beschrijf ALLEEN feitelijk wat je op ELKE kaart ziet — interpreteer niet. "
+            "Beschrijf per tijdsperiode wat zichtbaar is: welk landgebruik (akker, weiland, bos, "
+            "heide, bebouwing), welke infrastructuur (wegen, spoorlijnen, waterlopen), "
+            "en welke bebouwingspatronen. "
+            "Benoem specifiek welke veranderingen zichtbaar zijn tussen de kaarten. "
+            "Noem namen van zichtbare plaatsen, wegen of waterlopen als die leesbaar zijn. "
             "Bron: Topotijdreis.nl / Kadaster (historisch kaartmateriaal). "
-            "Geef een uitgebreide analyse van 5-8 zinnen."
+            "Geef een feitelijke beschrijving van 5-8 zinnen."
         ),
     },
 ]
@@ -188,8 +207,13 @@ def analyse_images(
             "text": (
                 f"Locatiecontext: {location_context}\n\n"
                 f"{section_prompt}\n\n"
-                "Antwoord in het Nederlands. Wees bondig en feitelijk. "
-                "Gebruik geen opsommingstekens, schrijf in lopende tekst."
+                "BELANGRIJKE INSTRUCTIES:\n"
+                "- Antwoord in het Nederlands.\n"
+                "- Beschrijf ALLEEN wat feitelijk zichtbaar is op de kaarten.\n"
+                "- Trek GEEN eigen conclusies, interpreteer niet, en speculeer niet.\n"
+                "- Noem specifieke namen van waterlopen, bossen, wegen, plaatsen waar mogelijk.\n"
+                "- Gebruik geen opsommingstekens, schrijf in lopende tekst.\n"
+                "- Wees concreet en feitelijk, niet algemeen."
             ),
         }
     ]
@@ -197,7 +221,7 @@ def analyse_images(
         content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": image_to_data_url(p), "detail": "low"},
+                "image_url": {"url": image_to_data_url(p), "detail": "high"},
             }
         )
 
@@ -205,8 +229,8 @@ def analyse_images(
         resp = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": content}],
-            max_tokens=400,
-            temperature=0.3,
+            max_tokens=700,
+            temperature=0.2,
         )
         return resp.choices[0].message.content or ""
     except Exception as e:
@@ -233,13 +257,17 @@ def analyse_text_only(
                     "content": (
                         f"Locatiecontext: {location_context}\n\n"
                         f"{prompt}\n\n"
-                        "Antwoord in het Nederlands. Wees bondig en feitelijk. "
-                        "Gebruik geen opsommingstekens, schrijf in lopende tekst."
+                        "BELANGRIJKE INSTRUCTIES:\n"
+                        "- Antwoord in het Nederlands.\n"
+                        "- Baseer je ALLEEN op feitelijke informatie en controleerbare bronnen.\n"
+                        "- Interpreteer niet, speculeer niet.\n"
+                        "- Noem altijd de naam van het document, het jaartal en de bron.\n"
+                        "- Gebruik geen opsommingstekens, schrijf in lopende tekst."
                     ),
                 }
             ],
-            max_tokens=600,
-            temperature=0.3,
+            max_tokens=900,
+            temperature=0.2,
         )
         return resp.choices[0].message.content or ""
     except Exception as e:
@@ -278,9 +306,40 @@ def web_search_history(location_context: str) -> str:
         return f"*Historisch onderzoek mislukt: {e}*"
 
 
+def web_search_omgevingsvisie(prompt: str, location_context: str) -> str:
+    """Use OpenAI Responses API with web search to find omgevingsvisie info."""
+    api_key = settings.openai_api_key
+    if not api_key:
+        return "*Geen OPENAI_API_KEY geconfigureerd.*"
+
+    client = OpenAI(api_key=api_key)
+
+    full_prompt = (
+        f"Locatiecontext: {location_context}\n\n"
+        f"{prompt}\n\n"
+        "BELANGRIJKE INSTRUCTIES:\n"
+        "- Zoek op het internet naar de daadwerkelijke omgevingsvisie en beleidsdocumenten.\n"
+        "- Antwoord in het Nederlands.\n"
+        "- Baseer je ALLEEN op feitelijke informatie die je online vindt.\n"
+        "- Noem altijd de naam van het document, het jaartal en de bron-URL.\n"
+        "- Gebruik geen opsommingstekens, schrijf in lopende tekst."
+    )
+
+    try:
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=full_prompt,
+            tools=[{"type": "web_search_preview"}],
+            max_output_tokens=900,
+        )
+        return resp.output_text or ""
+    except Exception as e:
+        return f"*Omgevingsvisie onderzoek mislukt: {e}*"
+
+
 # --------------- Wikimedia ---------------
 
-_WIKIMEDIA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+_WIKIMEDIA_UA = "SNW-Quickscan/1.0 (Studio Nico Wissing; quickscan tool)"
 
 
 def search_wikimedia_images(location_context: str, limit: int = 6) -> list[dict]:
@@ -288,18 +347,34 @@ def search_wikimedia_images(location_context: str, limit: int = 6) -> list[dict]
 
     Returns list of dicts with 'title', 'thumb_url', and 'description_url'.
     """
-    search_term = location_context.split(",")[0].strip()
-    parts = location_context.split(",")
-    for part in parts[1:]:
-        cleaned = part.strip()
-        if cleaned.lower().startswith("provincie "):
-            search_term += " " + cleaned[len("provincie "):]
-            break
-        elif cleaned.lower().startswith("gemeente "):
+    # Build a search term from location context — prefer place/gemeente names
+    # location_context is like "Julianaweg 22, 7078AR Megchelen, gemeente Oude IJsselstreek, provincie Gelderland"
+    parts = [p.strip() for p in location_context.split(",")]
+
+    # Extract woonplaats (second part often contains postcode + place)
+    place_name = ""
+    provincie = ""
+    for part in parts:
+        lower = part.lower()
+        if lower.startswith("gemeente "):
+            continue  # skip gemeente, too broad
+        if lower.startswith("provincie "):
+            provincie = part[len("provincie "):]
             continue
-        else:
-            search_term += " " + cleaned
-            break
+        # Look for postcode+place pattern like "7078AR Megchelen"
+        pc_match = re.match(r"^\d{4}\s?[A-Za-z]{2}\s+(.+)$", part)
+        if pc_match and not place_name:
+            place_name = pc_match.group(1)
+            continue
+
+    if not place_name:
+        # Fallback: use the first part (address) without house numbers
+        first = parts[0] if parts else location_context
+        place_name = re.sub(r"\d+.*$", "", first).strip()
+
+    search_term = place_name
+    if provincie:
+        search_term += " " + provincie
 
     params = {
         "action": "query",
@@ -452,7 +527,25 @@ def run_quickscan(
             entry["history_web"] = web_search_history(location_ctx)
 
             # Wikimedia Commons photos
-            entry["wikimedia_images"] = search_wikimedia_images(location_ctx)
+            wiki_images = search_wikimedia_images(location_ctx)
+            # Download thumbnails to disk so PPTX can embed them
+            for idx_w, wimg in enumerate(wiki_images):
+                thumb_url = wimg.get("thumb_url", "")
+                if not thumb_url:
+                    continue
+                local_fname = f"wikimedia_{idx_w}.jpg"
+                local_path = out_dir / local_fname
+                try:
+                    r = requests.get(
+                        thumb_url, timeout=15,
+                        headers={"User-Agent": _WIKIMEDIA_UA},
+                    )
+                    if r.status_code == 200:
+                        local_path.write_bytes(r.content)
+                        wimg["local_file"] = local_fname
+                except Exception:
+                    pass
+            entry["wikimedia_images"] = wiki_images
 
             results.append(entry)
             continue
@@ -481,22 +574,31 @@ def run_quickscan(
         # Bestemming: extra omgevingsvisie lookup
         if title == "Bestemming" and gemeente:
             ov_prompt = (
-                f"Zoek informatie over de omgevingsvisie van gemeente {gemeente}. "
+                f"Zoek informatie over de omgevingsvisie en relevante beleidsstukken "
+                f"van gemeente {gemeente}. "
                 "Beantwoord de volgende vragen zo concreet mogelijk:\n"
                 "1. Hoe heet de omgevingsvisie of structuurvisie van deze gemeente? "
                 "Wanneer is deze vastgesteld?\n"
                 "2. Wat zijn de belangrijkste ambities en beleidslijnen uit deze visie "
                 "die relevant zijn voor ruimtelijke ontwikkeling?\n"
-                "3. Zijn er specifieke gebiedsvisies, bestemmingsplannen of "
-                "programma's die van toepassing kunnen zijn op de beschreven locatie?\n"
-                "4. Welke kansen of beperkingen volgen hieruit voor een nieuw project "
-                "op deze locatie?\n\n"
+                "3. Wat is de visie van de gemeente op het landschap, groen, "
+                "biodiversiteit en ecologie? Zijn er specifieke doelen of ambities "
+                "op het gebied van natuurinclusief bouwen, klimaatadaptatie, of "
+                "vergroening?\n"
+                "4. Zijn er specifieke gebiedsvisies, bestemmingsplannen, "
+                "groenstructuurplannen, bomenbeleid, of programma's die van "
+                "toepassing kunnen zijn op de beschreven locatie?\n"
+                "5. Welke kansen of beperkingen volgen hieruit voor een nieuw project "
+                "op deze locatie? Wat zegt de gemeente specifiek over de impact "
+                "van ontwikkelingen op het landschap en de biodiversiteit?\n"
+                "6. Zijn er welstandsnota's, beeldkwaliteitsplannen of "
+                "landschapsontwikkelingsplannen van toepassing?\n\n"
                 "Vermeld altijd de naam van het document en het jaartal. "
                 "Vermeld ook de URL van de gemeente als je die kent. "
                 "Als je niet zeker bent over specifieke details, geef dit eerlijk aan "
                 "en verwijs naar de gemeentelijke website voor de meest actuele informatie."
             )
-            entry["omgevingsvisie"] = analyse_text_only(ov_prompt, location_ctx)
+            entry["omgevingsvisie"] = web_search_omgevingsvisie(ov_prompt, location_ctx)
 
         results.append(entry)
 
